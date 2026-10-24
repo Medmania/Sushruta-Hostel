@@ -1,15 +1,12 @@
-react
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  Building2, Users, Search, Plus, Filter, Shield, UserCheck, 
-  BedDouble, Wrench, Bell, PhoneCall, Upload, RefreshCw, 
-  CheckCircle, AlertCircle, Clock, Trash2, Edit, ChevronRight, 
-  MapPin, Phone, User, Calendar, DollarSign, FileText, Moon, Sun, 
-  Sparkles, Check, X, ArrowRight, Eye, ShieldAlert, Laptop, LogOut,
-  Database, Key, Lock, Copy, AlertTriangle, CheckSquare, Settings
+  Building2, Users, Search, Plus, UserCheck, 
+  BedDouble, Wrench, Clock, Edit, MapPin, 
+  Moon, Sun, Sparkles, X, Eye, 
+  Upload, Database, Copy, Settings
 } from 'lucide-react';
 
-// --- DEFAULT EMPTY CONFIGURATION SKELETON ---
+// --- DEFAULT CONFIGURATION SKELETON ---
 const DEFAULT_CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',
@@ -91,11 +88,9 @@ ALTER TABLE room_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE maintenance_tickets ENABLE ROW LEVEL SECURITY;
 
 -- 7. RLS POLICIES FOR PROFILES
--- Residents can ONLY view their own record if approved
 CREATE POLICY "Residents read own profile" ON profiles
   FOR SELECT USING (auth.uid() = auth_id AND status = 'approved');
 
--- Admins and Authorized users can read/modify ALL profiles
 CREATE POLICY "Admins full access on profiles" ON profiles
   FOR ALL USING (
     EXISTS (
@@ -159,7 +154,7 @@ export default function App() {
   // --- DARK MODE STATE ---
   const [darkMode, setDarkMode] = useState(false);
 
-  // --- REAL DATA STORES (EMPTY BY DEFAULT) ---
+  // --- DATA STORES ---
   const [students, setStudents] = useState(() => {
     const saved = localStorage.getItem('obh_db_students');
     return saved ? JSON.parse(saved) : [];
@@ -170,28 +165,22 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  const [notices, setNotices] = useState(() => {
-    const saved = localStorage.getItem('obh_db_notices');
-    return saved ? JSON.parse(saved) : [];
-  });
-
   // --- AUTH & ACTIVE USER SESSION ---
-  // Default session role can be switched to test different views: 'admin', 'authorized', 'resident', 'pending', 'unauthenticated'
   const [currentSession, setCurrentSession] = useState({
     isAuthenticated: true,
     user: {
       id: 'session_admin_01',
       name: 'Hostel Admin',
       email: 'admin@hostel.edu',
-      role: 'admin', // 'admin' | 'authorized' | 'resident'
-      status: 'approved', // 'approved' | 'pending' | 'rejected'
+      role: 'admin',
+      status: 'approved',
       block: 'Office Wing',
       roomNo: '12'
     }
   });
 
   // Navigation Tab
-  const [activeTab, setActiveTab] = useState('grid'); // 'grid', 'directory', 'approval', 'tickets', 'importer', 'sql'
+  const [activeTab, setActiveTab] = useState('grid');
 
   // Modal Controls
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -204,10 +193,10 @@ export default function App() {
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterBlock, setFilterBlock] = useState('All');
-  const [filterBatch, setFilterBatch] = useState('All');
-  const [filterCourse, setFilterCourse] = useState('All');
-  const [filterFee, setFilterFee] = useState('All');
+  const [filterBlock] = useState('All');
+  const [filterBatch] = useState('All');
+  const [filterCourse] = useState('All');
+  const [filterFee] = useState('All');
 
   // LocalStorage Persistence
   useEffect(() => {
@@ -222,42 +211,40 @@ export default function App() {
     localStorage.setItem('obh_db_complaints', JSON.stringify(complaints));
   }, [complaints]);
 
-  useEffect(() => {
-    localStorage.setItem('obh_db_notices', JSON.stringify(notices));
-  }, [notices]);
-
-  // Derived Statistics from Database
+  // Derived Statistics
   const approvedStudents = useMemo(() => students.filter(s => s.status === 'approved'), [students]);
   const pendingStudents = useMemo(() => students.filter(s => s.status === 'pending'), [students]);
 
   const stats = useMemo(() => {
-    const totalBeds = 150; // Total standard hostel room capacity
+    const totalBeds = 150;
     const occupiedBeds = approvedStudents.length;
     const vacantBeds = Math.max(0, totalBeds - occupiedBeds);
     const bdsCount = approvedStudents.filter(s => s.course === 'BDS').length;
     const mbbsCount = approvedStudents.filter(s => s.course === 'MBBS').length;
-    const feePendingCount = approvedStudents.filter(s => s.feeStatus !== 'Paid').length;
+    const feePendingCount = approvedStudents.filter(s => s.fee_status !== 'Paid' && s.feeStatus !== 'Paid').length;
 
     return { totalBeds, occupiedBeds, vacantBeds, bdsCount, mbbsCount, feePendingCount };
   }, [approvedStudents]);
 
-  // Filtered Students List for Admin View
+  // Filtered Students List
   const filteredStudents = useMemo(() => {
     return approvedStudents.filter(s => {
+      const roomVal = s.room_no || s.roomNo || '';
+      const rollVal = s.roll_no || '';
       const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            (s.roomNo && s.roomNo.includes(searchQuery)) ||
-                            (s.rollNo && s.rollNo.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                            roomVal.includes(searchQuery) ||
+                            rollVal.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             (s.phone && s.phone.includes(searchQuery));
       const matchesBlock = filterBlock === 'All' || s.block === filterBlock;
       const matchesBatch = filterBatch === 'All' || s.batch === filterBatch;
       const matchesCourse = filterCourse === 'All' || s.course === filterCourse;
-      const matchesFee = filterFee === 'All' || s.feeStatus === filterFee;
+      const matchesFee = filterFee === 'All' || (s.fee_status || s.feeStatus) === filterFee;
 
       return matchesSearch && matchesBlock && matchesBatch && matchesCourse && matchesFee;
     });
   }, [approvedStudents, searchQuery, filterBlock, filterBatch, filterCourse, filterFee]);
 
-  // Handle Save / Add Student
+  // Save / Add Student
   const handleSaveStudent = (e) => {
     e.preventDefault();
     if (editingStudent.id) {
@@ -268,7 +255,7 @@ export default function App() {
         id: 'std_' + Date.now(),
         status: 'approved',
         history: [{
-          roomNo: editingStudent.roomNo || 'Unassigned',
+          roomNo: editingStudent.room_no || editingStudent.roomNo || 'Unassigned',
           block: editingStudent.block || 'Office Wing',
           date: new Date().toISOString().split('T')[0],
           reason: 'Registration / Initial Allocation'
@@ -280,7 +267,7 @@ export default function App() {
     setEditingStudent(null);
   };
 
-  // Handle User Approval / Role Change
+  // User Approval / Role Change
   const handleUpdateUserStatus = (id, newStatus, newRole = 'resident') => {
     setStudents(prev => prev.map(s => {
       if (s.id === id) {
@@ -290,14 +277,14 @@ export default function App() {
     }));
   };
 
-  // Handle Room Transfer
+  // Execute Room Transfer
   const handleExecuteTransfer = (e) => {
     e.preventDefault();
     const student = students.find(s => s.id === transferData.studentId);
     if (!student) return;
 
     const historyRecord = {
-      oldRoom: student.roomNo || 'None',
+      oldRoom: student.room_no || student.roomNo || 'None',
       oldBlock: student.block || 'None',
       roomNo: transferData.targetRoom,
       block: transferData.targetBlock,
@@ -307,6 +294,7 @@ export default function App() {
 
     const updatedStudent = {
       ...student,
+      room_no: transferData.targetRoom,
       roomNo: transferData.targetRoom,
       block: transferData.targetBlock,
       history: [historyRecord, ...(student.history || [])]
@@ -317,7 +305,7 @@ export default function App() {
     if (selectedStudent?.id === student.id) setSelectedStudent(updatedStudent);
   };
 
-  // Handle Ticket Creation
+  // Create Maintenance Ticket
   const handleCreateTicket = (e) => {
     e.preventDefault();
     const resident = currentSession.user;
@@ -340,7 +328,7 @@ export default function App() {
     setNewTicket({ category: 'Electrical', title: '', description: '', priority: 'Medium' });
   };
 
-  // Get Active Resident Data (For Strict Privacy Mode)
+  // Active Resident Data
   const currentResidentData = useMemo(() => {
     if (currentSession.user.role === 'resident') {
       return students.find(s => s.id === currentSession.user.id || s.email === currentSession.user.email);
@@ -351,10 +339,9 @@ export default function App() {
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col md:flex-row font-sans transition-colors duration-200`}>
       
-      {/* --- SIDEBAR NAVIGATION --- */}
+      {/* SIDEBAR NAVIGATION */}
       <aside className={`w-full md:w-64 ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} border-r border-b md:border-b-0 flex-shrink-0 flex flex-col justify-between`}>
         <div>
-          {/* Header & Logo */}
           <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <div className="bg-indigo-600 text-white p-2.5 rounded-xl shadow-md">
@@ -373,7 +360,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Config Setup Status Banner */}
           <div className="p-3 m-3 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
             <div className="flex justify-between items-center">
               <span className="font-bold text-[10px] text-slate-400 uppercase tracking-wider">Backend Config</span>
@@ -390,7 +376,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Active Session Role Switcher */}
           <div className="p-3 m-3 rounded-xl bg-indigo-500/5 border border-indigo-500/20 space-y-2">
             <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
               <span>ACTIVE SESSION ROLE</span>
@@ -411,10 +396,9 @@ export default function App() {
                     user: { id: 'auth_1', name: 'Assistant Caretaker', email: 'caretaker@hostel.edu', role: 'authorized', status: 'approved' }
                   });
                 } else if (val === 'resident_approved') {
-                  // Link to resident or sample id
                   setCurrentSession({
                     isAuthenticated: true,
-                    user: { id: students[0]?.id || 'res_1', name: students[0]?.name || 'Sample Resident', email: 'resident@hostel.edu', role: 'resident', status: 'approved', roomNo: students[0]?.roomNo || '1', block: students[0]?.block || 'Office Wing' }
+                    user: { id: students[0]?.id || 'res_1', name: students[0]?.name || 'Sample Resident', email: 'resident@hostel.edu', role: 'resident', status: 'approved', roomNo: students[0]?.room_no || '1', block: students[0]?.block || 'Office Wing' }
                   });
                 } else if (val === 'resident_pending') {
                   setCurrentSession({
@@ -432,9 +416,7 @@ export default function App() {
             </select>
           </div>
 
-          {/* Nav Items */}
           <nav className="px-3 space-y-1">
-            {/* Resident or Admin Map/Grid */}
             {currentSession.user.status === 'approved' && (
               <>
                 {(currentSession.user.role === 'admin' || currentSession.user.role === 'authorized') && (
@@ -504,9 +486,8 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Dark Mode Footer */}
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 hidden md:flex items-center justify-between text-xs text-slate-500">
-          <span>OBH Skeleton v3.0</span>
+          <span>OBH Portal v3.0</span>
           <button 
             onClick={() => setDarkMode(!darkMode)}
             className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300"
@@ -516,10 +497,10 @@ export default function App() {
         </div>
       </aside>
 
-      {/* --- MAIN CONTENT CONTAINER --- */}
+      {/* MAIN CONTENT CONTAINER */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto max-h-screen">
         
-        {/* TOP STATS BAR (Only visible to Admin/Authorized) */}
+        {/* STATS HEADER */}
         {(currentSession.user.role === 'admin' || currentSession.user.role === 'authorized') && currentSession.user.status === 'approved' && (
           <div className={`p-4 border-b ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -551,7 +532,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 1: PENDING USER APPROVAL SCREEN (Strict Privacy Lock) */}
+        {/* VIEW 1: PENDING USER SCREEN */}
         {currentSession.user.status === 'pending' && (
           <div className="p-8 max-w-xl mx-auto my-12 text-center space-y-4">
             <div className="w-16 h-16 bg-amber-500/20 text-amber-600 rounded-full flex items-center justify-center mx-auto">
@@ -569,7 +550,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: VERIFIED RESIDENT ISOLATED PROFILE VIEW */}
+        {/* VIEW 2: RESIDENT PROFILE VIEW */}
         {currentSession.user.role === 'resident' && currentSession.user.status === 'approved' && (
           <div className="p-6 max-w-4xl mx-auto space-y-6">
             <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
@@ -579,7 +560,6 @@ export default function App() {
 
             {currentResidentData ? (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Profile Card */}
                 <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-4 shadow-sm`}>
                   <div className="text-center space-y-2">
                     <img
@@ -596,7 +576,7 @@ export default function App() {
                   <div className="space-y-2 text-xs divide-y divide-slate-100 dark:divide-slate-800 pt-2">
                     <div className="flex justify-between py-1.5">
                       <span className="text-slate-400 font-medium">Room Allocation</span>
-                      <span className="font-bold text-indigo-600">{currentResidentData.block}, Room {currentResidentData.room_no}</span>
+                      <span className="font-bold text-indigo-600">{currentResidentData.block}, Room {currentResidentData.room_no || currentResidentData.roomNo}</span>
                     </div>
                     <div className="flex justify-between py-1.5">
                       <span className="text-slate-400 font-medium">Roll Number</span>
@@ -613,17 +593,15 @@ export default function App() {
                     <div className="flex justify-between py-1.5">
                       <span className="text-slate-400 font-medium">Fee Clearance</span>
                       <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                        currentResidentData.fee_status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                        (currentResidentData.fee_status || currentResidentData.feeStatus) === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
                       }`}>
-                        {currentResidentData.fee_status}
+                        {currentResidentData.fee_status || currentResidentData.feeStatus}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Personal History & Complaint Tickets Column */}
                 <div className="md:col-span-2 space-y-6">
-                  {/* Room Swap History Log */}
                   <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-3 shadow-sm`}>
                     <h4 className="font-bold text-sm text-slate-500 uppercase tracking-wider flex items-center space-x-2">
                       <Clock className="w-4 h-4 text-indigo-500" />
@@ -635,7 +613,7 @@ export default function App() {
                         currentResidentData.history.map((h, i) => (
                           <div key={i} className="text-xs space-y-0.5 relative">
                             <div className="w-2 h-2 rounded-full bg-indigo-500 absolute -left-[17px] top-1"></div>
-                            <p className="font-bold text-slate-800 dark:text-slate-200">{h.block}, Room {h.roomNo}</p>
+                            <p className="font-bold text-slate-800 dark:text-slate-200">{h.block}, Room {h.roomNo || h.room_no}</p>
                             <p className="text-slate-400 text-[11px]">{h.date} • {h.reason}</p>
                           </div>
                         ))
@@ -645,7 +623,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Submit Maintenance Ticket */}
                   <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-3 shadow-sm`}>
                     <div className="flex justify-between items-center">
                       <h4 className="font-bold text-sm text-slate-500 uppercase tracking-wider flex items-center space-x-2">
@@ -690,13 +667,13 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 3: ADMIN BLOCK GRID & MAP */}
+        {/* VIEW 3: ADMIN ROOM GRID */}
         {activeTab === 'grid' && (currentSession.user.role === 'admin' || currentSession.user.role === 'authorized') && currentSession.user.status === 'approved' && (
           <div className="p-6 space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h2 className="text-xl font-bold tracking-tight">Hostel Block & Room Grid</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Real-time room availability calculated dynamically from registered database records.</p>
+                <p className="text-xs text-slate-500 mt-0.5">Real-time room availability calculated dynamically from database records.</p>
               </div>
 
               <div className="flex items-center space-x-2">
@@ -725,9 +702,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Block Sections */}
             {HOSTEL_BLOCKS.map(blockName => {
-              // Get residents in this block
               const blockResidents = approvedStudents.filter(s => s.block === blockName);
 
               return (
@@ -795,7 +770,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Table */}
             <div className={`rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} overflow-x-auto shadow-sm`}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
@@ -813,7 +787,7 @@ export default function App() {
                     filteredStudents.map(std => (
                       <tr key={std.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition">
                         <td className="p-3 flex items-center space-x-2.5">
-                          <img src={std.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-7 h-7 rounded-full object-cover border" />
+                          <img src={std.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-7 h-7 rounded-full object-cover border" alt={std.name} />
                           <div>
                             <p className="font-bold text-slate-800 dark:text-slate-100">{std.name}</p>
                             <p className="text-[10px] text-slate-400">Father: {std.father_name || 'N/A'}</p>
@@ -830,7 +804,7 @@ export default function App() {
                         <td className="p-3">{std.phone || 'N/A'}</td>
                         <td className="p-3">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            std.fee_status === 'Paid' || std.feeStatus === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                            (std.fee_status || std.feeStatus) === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
                           }`}>
                             {std.fee_status || std.feeStatus}
                           </span>
@@ -975,7 +949,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 7: GEMINI GOOGLE SHEET BULK IMPORTER */}
+        {/* VIEW 7: GEMINI GOOGLE SHEET IMPORTER */}
         {activeTab === 'importer' && currentSession.user.role === 'admin' && (
           <div className="p-6 max-w-4xl mx-auto space-y-5">
             <div>
@@ -1068,7 +1042,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 8: SUPABASE SQL SETUP GUIDE & RLS POLICIES */}
+        {/* VIEW 8: SUPABASE SQL SETUP GUIDE */}
         {activeTab === 'sql' && (
           <div className="p-6 max-w-4xl mx-auto space-y-4">
             <div className="flex justify-between items-center">
@@ -1096,7 +1070,7 @@ export default function App() {
 
       </main>
 
-      {/* --- CONFIGURATION MODAL --- */}
+      {/* CONFIGURATION MODAL */}
       {isConfigOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
@@ -1165,7 +1139,7 @@ export default function App() {
         </div>
       )}
 
-      {/* --- ADD/EDIT RESIDENT MODAL --- */}
+      {/* ADD/EDIT RESIDENT MODAL */}
       {isEditStudentModalOpen && editingStudent && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={handleSaveStudent} className={`w-full max-w-lg rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
@@ -1283,13 +1257,13 @@ export default function App() {
         </div>
       )}
 
-      {/* --- RESIDENT PROFILE INSPECTOR & ROOM TRANSFER MODAL --- */}
+      {/* INSPECTOR & TRANSFER MODAL */}
       {selectedStudent && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-start pb-2 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center space-x-3">
-                <img src={selectedStudent.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-12 h-12 rounded-full object-cover border-2 border-indigo-500" />
+                <img src={selectedStudent.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-12 h-12 rounded-full object-cover border-2 border-indigo-500" alt={selectedStudent.name} />
                 <div>
                   <h3 className="font-bold text-base">{selectedStudent.name}</h3>
                   <p className="text-xs text-slate-400">{selectedStudent.course} • Batch {selectedStudent.batch}</p>
@@ -1317,7 +1291,7 @@ export default function App() {
                 {selectedStudent.history && selectedStudent.history.length > 0 ? (
                   selectedStudent.history.map((h, i) => (
                     <div key={i} className="text-xs">
-                      <span className="font-bold">{h.block}, Room {h.roomNo}</span>
+                      <span className="font-bold">{h.block}, Room {h.roomNo || h.room_no}</span>
                       <span className="text-slate-400 block text-[10px]">{h.date} • {h.reason}</span>
                     </div>
                   ))
@@ -1350,7 +1324,7 @@ export default function App() {
         </div>
       )}
 
-      {/* --- TRANSFER ROOM MODAL --- */}
+      {/* TRANSFER ROOM MODAL */}
       {isTransferModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={handleExecuteTransfer} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
@@ -1416,7 +1390,7 @@ export default function App() {
         </div>
       )}
 
-      {/* --- CREATE TICKET MODAL --- */}
+      {/* CREATE TICKET MODAL */}
       {isTicketModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={handleCreateTicket} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
