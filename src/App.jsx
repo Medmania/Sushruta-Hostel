@@ -5,7 +5,7 @@ import {
   BedDouble, Wrench, Clock, Edit, MapPin, 
   Moon, Sun, Sparkles, X, Eye, 
   Upload, Database, Copy, Settings, LogOut, Lock, Mail,
-  Map, Image as ImageIcon, Trash2
+  Map, Image as ImageIcon, Trash2, Calendar, CreditCard, Phone, User, FileText, CheckCircle, AlertCircle
 } from 'lucide-react';
 
 // --- DEFAULT CONFIGURATION ---
@@ -16,14 +16,14 @@ const DEFAULT_CONFIG = {
   googleAppsScriptUrl: ''
 };
 
-// --- READY-TO-RUN SUPABASE SQL SCHEMA & RLS POLICIES ---
+// --- READY-TO-RUN SUPABASE SQL SCHEMA ---
 const SUPABASE_SQL_SCHEMA = `-- 1. CREATE ENUMS
 CREATE TYPE user_role AS ENUM ('admin', 'authorized', 'resident');
 CREATE TYPE user_status AS ENUM ('pending', 'approved', 'rejected');
 CREATE TYPE fee_status_type AS ENUM ('Paid', 'Pending', 'Partial');
 CREATE TYPE ticket_status AS ENUM ('Pending', 'In Progress', 'Resolved');
 
--- 2. CREATE PROFILES TABLE (Linked to Supabase Auth)
+-- 2. CREATE PROFILES TABLE
 CREATE TABLE profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   auth_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -37,6 +37,7 @@ CREATE TABLE profiles (
   phone TEXT,
   father_name TEXT,
   address TEXT,
+  joining_date DATE DEFAULT CURRENT_DATE,
   fee_status fee_status_type DEFAULT 'Pending',
   fee_amount NUMERIC DEFAULT 45000,
   paid_amount NUMERIC DEFAULT 0,
@@ -46,7 +47,22 @@ CREATE TABLE profiles (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. CREATE ROOM HISTORY TABLE
+-- 3. CREATE YEAR-WISE FEE LEDGER TABLE
+CREATE TABLE fee_ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  academic_year TEXT NOT NULL,
+  block TEXT,
+  room_no TEXT,
+  total_amount NUMERIC NOT NULL,
+  paid_amount NUMERIC DEFAULT 0,
+  status fee_status_type DEFAULT 'Pending',
+  payment_date DATE,
+  remarks TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. CREATE ROOM HISTORY TABLE WITH TRANSFER DATES
 CREATE TABLE room_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   student_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
@@ -54,12 +70,13 @@ CREATE TABLE room_history (
   old_block TEXT,
   new_room TEXT NOT NULL,
   new_block TEXT NOT NULL,
+  joining_date DATE,
   transfer_date DATE DEFAULT CURRENT_DATE,
   reason TEXT,
   updated_by TEXT
 );
 
--- 4. CREATE MAINTENANCE TICKETS TABLE
+-- 5. CREATE MAINTENANCE TICKETS TABLE
 CREATE TABLE maintenance_tickets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   student_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
@@ -74,8 +91,9 @@ CREATE TABLE maintenance_tickets (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. ENABLE ROW LEVEL SECURITY (RLS)
+-- 6. ENABLE ROW LEVEL SECURITY
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fee_ledger ENABLE ROW LEVEL SECURITY;
 ALTER TABLE room_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE maintenance_tickets ENABLE ROW LEVEL SECURITY;`;
 
@@ -89,7 +107,7 @@ export default function App() {
   });
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
-  // Initialize Supabase Client dynamically
+  // Supabase Client Initialization
   const supabase = useMemo(() => {
     if (config.supabaseUrl && config.supabaseAnonKey) {
       try {
@@ -102,18 +120,18 @@ export default function App() {
     return null;
   }, [config.supabaseUrl, config.supabaseAnonKey]);
 
-  // --- AUTH & SESSION STATE ---
-  const [sessionUser, setSessionUser] = useState(null); // null when logged out
+  // Auth & Session
+  const [sessionUser, setSessionUser] = useState(null);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  // --- DARK MODE STATE ---
+  // Dark Mode
   const [darkMode, setDarkMode] = useState(false);
 
-  // --- LOCAL STORES & CAPACITY SETTINGS ---
+  // Capacity & Map Settings
   const [totalBedsCapacity, setTotalBedsCapacity] = useState(() => {
     const saved = localStorage.getItem('obh_total_beds');
     return saved ? parseInt(saved, 10) : 150;
@@ -121,14 +139,42 @@ export default function App() {
   const [isBedCapacityModalOpen, setIsBedCapacityModalOpen] = useState(false);
   const [tempBedCapacity, setTempBedCapacity] = useState(totalBedsCapacity);
 
-  // --- HOSTEL MAP STATE ---
   const [hostelMapUrl, setHostelMapUrl] = useState(() => {
     return localStorage.getItem('obh_hostel_map') || '';
   });
 
+  // Local Stores
   const [students, setStudents] = useState(() => {
     const saved = localStorage.getItem('obh_db_students');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) return JSON.parse(saved);
+    
+    // Default initial seed data with year-wise ledger and dates
+    return [
+      {
+        id: 'std_1',
+        name: 'Ankit Raj',
+        email: 'ankit.raj@hostel.edu',
+        roll_no: '2023MBBS001',
+        course: 'MBBS',
+        batch: '2023',
+        block: 'Office Wing',
+        room_no: '23',
+        phone: '+91 9876543210',
+        father_name: 'S. K. Raj',
+        joining_date: '2023-08-01',
+        fee_status: 'Paid',
+        status: 'approved',
+        role: 'admin',
+        fee_ledger: [
+          { year: '2023-24', block: 'Office Wing', room_no: '23', amount: 45000, paid: 45000, status: 'Paid', date: '2023-08-05' },
+          { year: '2024-25', block: 'Office Wing', room_no: '23', amount: 45000, paid: 45000, status: 'Paid', date: '2024-07-28' },
+          { year: '2025-26', block: 'Office Wing', room_no: '23', amount: 45000, paid: 20000, status: 'Partial', date: '2025-08-10' }
+        ],
+        history: [
+          { oldRoom: 'Initial', oldBlock: 'Office Wing', newRoom: '23', newBlock: 'Office Wing', date: '2023-08-01', reason: 'Initial Hostel Allocation' }
+        ]
+      }
+    ];
   });
 
   const [complaints, setComplaints] = useState(() => {
@@ -136,22 +182,41 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Navigation Tab
+  // Navigation
   const [activeTab, setActiveTab] = useState('grid');
 
-  // Modal Controls
+  // Modals & Forms
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [isEditStudentModalOpen, setIsEditStudentModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
+  
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
-  const [transferData, setTransferData] = useState({ studentId: '', targetBlock: 'Office Wing', targetRoom: '1', reason: '' });
+  const [transferData, setTransferData] = useState({ 
+    studentId: '', 
+    targetBlock: 'Office Wing', 
+    targetRoom: '1', 
+    transferDate: new Date().toISOString().split('T')[0],
+    academicYear: '2026-27',
+    reason: '' 
+  });
+
+  const [isNewFeeEntryModalOpen, setIsNewFeeEntryModalOpen] = useState(false);
+  const [newFeeEntry, setNewFeeEntry] = useState({
+    academicYear: '2026-27',
+    amount: 45000,
+    paid: 45000,
+    status: 'Paid',
+    paymentDate: new Date().toISOString().split('T')[0],
+    remarks: 'Annual Hostel Fee'
+  });
+
   const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
   const [newTicket, setNewTicket] = useState({ category: 'Electrical', title: '', description: '', priority: 'Medium' });
 
-  // Filters State
+  // Filters
   const [searchQuery, setSearchQuery] = useState('');
 
-  // LocalStorage Sync
+  // Local Storage Sync
   useEffect(() => {
     localStorage.setItem('obh_app_config', JSON.stringify(config));
   }, [config]);
@@ -161,11 +226,8 @@ export default function App() {
   }, [totalBedsCapacity]);
 
   useEffect(() => {
-    if (hostelMapUrl) {
-      localStorage.setItem('obh_hostel_map', hostelMapUrl);
-    } else {
-      localStorage.removeItem('obh_hostel_map');
-    }
+    if (hostelMapUrl) localStorage.setItem('obh_hostel_map', hostelMapUrl);
+    else localStorage.removeItem('obh_hostel_map');
   }, [hostelMapUrl]);
 
   useEffect(() => {
@@ -176,28 +238,22 @@ export default function App() {
     localStorage.setItem('obh_db_complaints', JSON.stringify(complaints));
   }, [complaints]);
 
-  // --- REAL AUTH LISTENER ---
+  // Auth Listener
   useEffect(() => {
     if (!supabase) return;
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        syncUserProfile(session.user);
-      }
+      if (session?.user) syncUserProfile(session.user);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        syncUserProfile(session.user);
-      } else {
-        setSessionUser(null);
-      }
+      if (session?.user) syncUserProfile(session.user);
+      else setSessionUser(null);
     });
 
     return () => subscription.unsubscribe();
   }, [supabase]);
 
-  // Fetch or create profile row in local database / Supabase
   const syncUserProfile = (authUser) => {
     const existing = students.find(s => s.email === authUser.email);
     if (existing) {
@@ -214,14 +270,20 @@ export default function App() {
         batch: '2023',
         block: 'Office Wing',
         room_no: 'Unassigned',
-        fee_status: 'Pending'
+        phone: '',
+        father_name: '',
+        joining_date: new Date().toISOString().split('T')[0],
+        fee_status: 'Pending',
+        fee_ledger: [
+          { year: '2026-27', block: 'Office Wing', room_no: 'Unassigned', amount: 45000, paid: 0, status: 'Pending', date: '' }
+        ],
+        history: []
       };
       setSessionUser(newUser);
       setStudents(prev => [...prev, newUser]);
     }
   };
 
-  // --- HANDLERS FOR LOGIN & GOOGLE AUTH ---
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -229,7 +291,7 @@ export default function App() {
 
     if (!supabase) {
       const isFirst = students.length === 0 || loginEmail.includes('admin');
-      const mockUser = {
+      const mockUser = students.find(s => s.email === loginEmail) || {
         id: 'usr_' + Date.now(),
         email: loginEmail,
         name: loginEmail.split('@')[0],
@@ -238,8 +300,15 @@ export default function App() {
         course: 'MBBS',
         batch: '2023',
         block: 'Office Wing',
-        room_no: '10',
-        fee_status: 'Paid'
+        room_no: '23',
+        phone: '+91 9876543210',
+        father_name: 'S. K. Raj',
+        joining_date: '2023-08-01',
+        fee_status: 'Paid',
+        fee_ledger: [
+          { year: '2026-27', block: 'Office Wing', room_no: '23', amount: 45000, paid: 45000, status: 'Paid', date: '2026-08-01' }
+        ],
+        history: []
       };
       setSessionUser(mockUser);
       if (!students.some(s => s.email === loginEmail)) {
@@ -253,7 +322,7 @@ export default function App() {
       if (isSigningUp) {
         const { error } = await supabase.auth.signUp({ email: loginEmail, password: loginPassword });
         if (error) throw error;
-        alert('Registration link sent! Please check your email to verify your account.');
+        alert('Registration link sent! Please check your email.');
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword });
         if (error) throw error;
@@ -267,7 +336,7 @@ export default function App() {
 
   const handleGoogleSignIn = async () => {
     if (!supabase) {
-      alert('Please configure your SUPABASE_URL and SUPABASE_ANON_KEY first using the settings button in the bottom left corner!');
+      alert('Please configure SUPABASE credentials in API settings first!');
       setIsConfigOpen(true);
       return;
     }
@@ -285,7 +354,6 @@ export default function App() {
     setSessionUser(null);
   };
 
-  // --- MAP UPLOAD HANDLER ---
   const handleMapFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -303,7 +371,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // Derived Statistics
+  // Stats calculation
   const approvedStudents = useMemo(() => students.filter(s => s.status === 'approved'), [students]);
   const pendingStudents = useMemo(() => students.filter(s => s.status === 'pending'), [students]);
 
@@ -313,27 +381,33 @@ export default function App() {
     const vacantBeds = Math.max(0, totalBeds - occupiedBeds);
     const bdsCount = approvedStudents.filter(s => s.course === 'BDS').length;
     const mbbsCount = approvedStudents.filter(s => s.course === 'MBBS').length;
-    const feePendingCount = approvedStudents.filter(s => (s.fee_status || s.feeStatus) !== 'Paid').length;
+    const feePendingCount = approvedStudents.filter(s => {
+      const currentYearLedger = s.fee_ledger?.[s.fee_ledger.length - 1];
+      return currentYearLedger ? currentYearLedger.status !== 'Paid' : s.fee_status !== 'Paid';
+    }).length;
 
     return { totalBeds, occupiedBeds, vacantBeds, bdsCount, mbbsCount, feePendingCount };
   }, [approvedStudents, totalBedsCapacity]);
 
-  // Filtered Students List
+  // Filtered Students
   const filteredStudents = useMemo(() => {
     return approvedStudents.filter(s => {
       const roomVal = s.room_no || s.roomNo || '';
       const rollVal = s.roll_no || '';
+      const phoneVal = s.phone || '';
+      const fatherVal = s.father_name || '';
       return s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
              roomVal.includes(searchQuery) ||
              rollVal.toLowerCase().includes(searchQuery.toLowerCase()) ||
-             (s.phone && s.phone.includes(searchQuery));
+             phoneVal.includes(searchQuery) ||
+             fatherVal.toLowerCase().includes(searchQuery.toLowerCase());
     });
   }, [approvedStudents, searchQuery]);
 
-  // Save / Add Resident (ADMIN ONLY)
+  // Save / Update Full Resident Details (ADMIN ONLY)
   const handleSaveStudent = (e) => {
     e.preventDefault();
-    if (sessionUser?.role !== 'admin') return alert('Access Denied: Only Admins can register or modify residents.');
+    if (sessionUser?.role !== 'admin') return alert('Access Denied: Only Admins can edit resident records.');
 
     if (editingStudent.id) {
       setStudents(prev => prev.map(s => s.id === editingStudent.id ? editingStudent : s));
@@ -342,20 +416,39 @@ export default function App() {
         ...editingStudent,
         id: 'std_' + Date.now(),
         status: 'approved',
+        fee_ledger: editingStudent.fee_ledger || [
+          {
+            year: '2026-27',
+            block: editingStudent.block,
+            room_no: editingStudent.room_no,
+            amount: 45000,
+            paid: editingStudent.fee_status === 'Paid' ? 45000 : 0,
+            status: editingStudent.fee_status || 'Pending',
+            date: new Date().toISOString().split('T')[0]
+          }
+        ],
         history: [{
-          roomNo: editingStudent.room_no || 'Unassigned',
-          block: editingStudent.block || 'Office Wing',
-          date: new Date().toISOString().split('T')[0],
-          reason: 'Registration / Initial Allocation'
+          oldRoom: 'None',
+          oldBlock: 'None',
+          newRoom: editingStudent.room_no || 'Unassigned',
+          newBlock: editingStudent.block || 'Office Wing',
+          date: editingStudent.joining_date || new Date().toISOString().split('T')[0],
+          reason: 'Initial Registration'
         }]
       };
       setStudents(prev => [...prev, newEntry]);
     }
+
     setIsEditStudentModalOpen(false);
+    
+    // Update selected profile view if open
+    if (selectedStudent?.id === editingStudent.id) {
+      setSelectedStudent(editingStudent);
+    }
     setEditingStudent(null);
   };
 
-  // Execute Room Transfer (ADMIN ONLY)
+  // Execute Room Transfer with Year-wise Fee & Stay Dates
   const handleExecuteTransfer = (e) => {
     e.preventDefault();
     if (sessionUser?.role !== 'admin') return alert('Access Denied: Admin role required.');
@@ -366,22 +459,66 @@ export default function App() {
     const historyRecord = {
       oldRoom: student.room_no || 'None',
       oldBlock: student.block || 'None',
-      roomNo: transferData.targetRoom,
+      newRoom: transferData.targetRoom,
+      newBlock: transferData.targetBlock,
+      date: transferData.transferDate,
+      reason: transferData.reason || 'Annual Room Re-allocation'
+    };
+
+    // Append new Year-wise Fee Ledger for the new room session
+    const newYearFee = {
+      year: transferData.academicYear,
       block: transferData.targetBlock,
-      date: new Date().toISOString().split('T')[0],
-      reason: transferData.reason || 'Admin Re-allocation'
+      room_no: transferData.targetRoom,
+      amount: 45000,
+      paid: 0,
+      status: 'Pending',
+      date: transferData.transferDate,
+      remarks: `Allocated Room ${transferData.targetRoom} (${transferData.targetBlock})`
     };
 
     const updatedStudent = {
       ...student,
       room_no: transferData.targetRoom,
       block: transferData.targetBlock,
+      joining_date: transferData.transferDate, // update active room joining date
+      fee_ledger: [newYearFee, ...(student.fee_ledger || [])],
       history: [historyRecord, ...(student.history || [])]
     };
 
     setStudents(prev => prev.map(s => s.id === student.id ? updatedStudent : s));
     setIsTransferModalOpen(false);
     if (selectedStudent?.id === student.id) setSelectedStudent(updatedStudent);
+  };
+
+  // Add Year-Wise Fee Entry
+  const handleAddFeeEntry = (e) => {
+    e.preventDefault();
+    if (!selectedStudent) return;
+
+    const updatedLedger = [
+      {
+        year: newFeeEntry.academicYear,
+        block: selectedStudent.block,
+        room_no: selectedStudent.room_no,
+        amount: Number(newFeeEntry.amount),
+        paid: Number(newFeeEntry.paid),
+        status: newFeeEntry.status,
+        date: newFeeEntry.paymentDate,
+        remarks: newFeeEntry.remarks
+      },
+      ...(selectedStudent.fee_ledger || [])
+    ];
+
+    const updatedStudent = {
+      ...selectedStudent,
+      fee_status: newFeeEntry.status,
+      fee_ledger: updatedLedger
+    };
+
+    setStudents(prev => prev.map(s => s.id === selectedStudent.id ? updatedStudent : s));
+    setSelectedStudent(updatedStudent);
+    setIsNewFeeEntryModalOpen(false);
   };
 
   // --- UNAUTHENTICATED LOGIN SCREEN ---
@@ -403,7 +540,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Google Sign-In Button */}
           <button
             onClick={handleGoogleSignIn}
             className="w-full py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-2xl text-xs flex items-center justify-center space-x-2 shadow-md transition"
@@ -423,7 +559,6 @@ export default function App() {
             <div className="flex-1 border-t border-slate-800"></div>
           </div>
 
-          {/* Email / Password Form */}
           <form onSubmit={handleEmailAuth} className="space-y-3 text-xs">
             <div>
               <label className="font-bold text-slate-400 block mb-1">Email Address</label>
@@ -483,7 +618,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* API CONFIG MODAL FOR UNLEASHING SUPABASE */}
         {isConfigOpen && (
           <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
@@ -531,11 +665,11 @@ export default function App() {
     );
   }
 
-  // --- AUTHENTICATED MAIN DASHBOARD ---
+  // --- MAIN DASHBOARD ---
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col md:flex-row font-sans transition-colors duration-200`}>
       
-      {/* SIDEBAR NAVIGATION */}
+      {/* SIDEBAR */}
       <aside className={`w-full md:w-64 ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} border-r border-b md:border-b-0 flex-shrink-0 flex flex-col justify-between`}>
         <div>
           <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
@@ -556,7 +690,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* ACTIVE LOGGED-IN USER INFO */}
           <div className="p-3 m-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 space-y-1">
             <div className="flex justify-between items-center">
               <span className="font-bold text-[10px] text-slate-400 uppercase tracking-wider">Logged In As</span>
@@ -568,7 +701,6 @@ export default function App() {
             <p className="text-[10px] text-slate-400 truncate">{sessionUser.email}</p>
           </div>
 
-          {/* NAVIGATION ITEMS */}
           <nav className="px-3 space-y-1">
             {sessionUser.status === 'approved' && (
               <>
@@ -649,7 +781,6 @@ export default function App() {
           </nav>
         </div>
 
-        {/* LOGOUT & SETTINGS FOOTER */}
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 space-y-2 text-xs">
           <button
             onClick={handleLogout}
@@ -661,14 +792,14 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
+      {/* MAIN VIEW */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto max-h-screen">
         
-        {/* TOP STATS BAR (Admin & Staff Only) */}
+        {/* STATS BAR */}
         {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
           <div className={`p-4 border-b ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 relative group">
+              <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
                 <div className="flex justify-between items-center">
                   <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Est. Beds</p>
                   {sessionUser.role === 'admin' && (
@@ -677,8 +808,7 @@ export default function App() {
                         setTempBedCapacity(totalBedsCapacity);
                         setIsBedCapacityModalOpen(true);
                       }}
-                      className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 p-0.5"
-                      title="Edit Total Beds Capacity"
+                      className="text-indigo-600 dark:text-indigo-400"
                     >
                       <Edit className="w-3.5 h-3.5" />
                     </button>
@@ -710,82 +840,13 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 1: PENDING ACCOUNT LOCK SCREEN */}
-        {sessionUser.status === 'pending' && (
-          <div className="p-8 max-w-xl mx-auto my-12 text-center space-y-4">
-            <div className="w-16 h-16 bg-amber-500/20 text-amber-600 rounded-full flex items-center justify-center mx-auto">
-              <Clock className="w-8 h-8" />
-            </div>
-            <h2 className="text-2xl font-black">Account Pending Admin Approval</h2>
-            <p className="text-sm text-slate-500 leading-relaxed">
-              Welcome, <strong className="text-slate-800 dark:text-slate-200">{sessionUser.name}</strong>! Your account registration has been created and is currently awaiting approval from the Hostel Admin.
-            </p>
-            <div className="p-4 rounded-xl bg-slate-100 dark:bg-slate-800/60 text-xs text-slate-500 text-left space-y-1 border border-slate-200 dark:border-slate-700">
-              <p className="font-bold text-slate-700 dark:text-slate-300 mb-1">Privacy Protection Active:</p>
-              <p>• You cannot view other residents' data, room maps, or directories.</p>
-              <p>• Once an admin approves your account, your personal room allocation will unlock here.</p>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 2: RESIDENT ISOLATED DASHBOARD */}
-        {sessionUser.role === 'resident' && sessionUser.status === 'approved' && (
-          <div className="p-6 max-w-4xl mx-auto space-y-6">
-            <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
-              <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider">Resident Personal Desk</span>
-              <h2 className="text-2xl font-black">My Hostel Dashboard</h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-4 shadow-sm`}>
-                <div className="text-center space-y-2">
-                  <img
-                    src={sessionUser.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'}
-                    alt={sessionUser.name}
-                    className="w-20 h-20 rounded-full mx-auto object-cover border-2 border-indigo-500 shadow"
-                  />
-                  <h3 className="font-bold text-lg">{sessionUser.name}</h3>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
-                    {sessionUser.course || 'MBBS'} • Batch {sessionUser.batch || '2023'}
-                  </span>
-                </div>
-
-                <div className="space-y-2 text-xs divide-y divide-slate-100 dark:divide-slate-800 pt-2">
-                  <div className="flex justify-between py-1.5">
-                    <span className="text-slate-400 font-medium">Room Allocation</span>
-                    <span className="font-bold text-indigo-600">{sessionUser.block}, Room {sessionUser.room_no}</span>
-                  </div>
-                  <div className="flex justify-between py-1.5">
-                    <span className="text-slate-400 font-medium">Fee Clearance</span>
-                    <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                      sessionUser.fee_status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
-                    }`}>
-                      {sessionUser.fee_status}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="md:col-span-2 space-y-6">
-                <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-3 shadow-sm`}>
-                  <h4 className="font-bold text-sm text-slate-500 uppercase tracking-wider flex items-center space-x-2">
-                    <Clock className="w-4 h-4 text-indigo-500" />
-                    <span>My Room Movement History</span>
-                  </h4>
-                  <p className="text-xs text-slate-400 italic">No room transfers recorded for your profile.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 3: ADMIN ROOM GRID */}
+        {/* TAB 1: ROOM GRID */}
         {activeTab === 'grid' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
           <div className="p-6 space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h2 className="text-xl font-bold tracking-tight">Hostel Block & Room Grid</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Real-time room availability calculated dynamically from database records.</p>
+                <p className="text-xs text-slate-500 mt-0.5">Click any resident card to view their full profile, joining date, and fee ledger.</p>
               </div>
 
               <div className="flex items-center space-x-2">
@@ -793,7 +854,7 @@ export default function App() {
                   <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="Search room or resident..."
+                    placeholder="Search name, room, phone..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className={`pl-8 pr-3 py-1.5 text-xs rounded-lg border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-300'}`}
@@ -802,7 +863,18 @@ export default function App() {
                 {sessionUser.role === 'admin' && (
                   <button
                     onClick={() => {
-                      setEditingStudent({ name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Wing', room_no: '1', phone: '', father_name: '', address: '', fee_status: 'Paid', fee_amount: 45000, paid_amount: 45000, photo_url: '' });
+                      setEditingStudent({ 
+                        name: '', 
+                        roll_no: '', 
+                        course: 'MBBS', 
+                        batch: '2023', 
+                        block: 'Office Wing', 
+                        room_no: '1', 
+                        phone: '', 
+                        father_name: '', 
+                        joining_date: new Date().toISOString().split('T')[0],
+                        fee_status: 'Paid'
+                      });
                       setIsEditStudentModalOpen(true);
                     }}
                     className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
@@ -845,6 +917,7 @@ export default function App() {
                           </div>
                           <p className="font-semibold text-xs mt-1 truncate">{std.name}</p>
                           <p className="text-[10px] text-slate-400 mt-0.5">Batch {std.batch}</p>
+                          {std.phone && <p className="text-[9px] text-slate-500 mt-1 truncate">{std.phone}</p>}
                         </div>
                       ))}
                     </div>
@@ -859,7 +932,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 3.5: HOSTEL LAYOUT MAP */}
+        {/* TAB 2: HOSTEL MAP */}
         {activeTab === 'map' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
           <div className="p-6 space-y-4 max-w-5xl mx-auto">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -879,12 +952,9 @@ export default function App() {
                   {hostelMapUrl && (
                     <button
                       onClick={() => {
-                        if (confirm('Are you sure you want to remove the current hostel map?')) {
-                          setHostelMapUrl('');
-                        }
+                        if (confirm('Delete current hostel map?')) setHostelMapUrl('');
                       }}
                       className="p-1.5 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 rounded-lg text-xs"
-                      title="Delete Map"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -895,43 +965,43 @@ export default function App() {
 
             <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm min-h-[400px] flex items-center justify-center`}>
               {hostelMapUrl ? (
-                <img
-                  src={hostelMapUrl}
-                  alt="Hostel Layout Map"
-                  className="w-full h-auto max-h-[75vh] object-contain rounded-xl"
-                />
+                <img src={hostelMapUrl} alt="Hostel Layout Map" className="w-full h-auto max-h-[75vh] object-contain rounded-xl" />
               ) : (
                 <div className="text-center space-y-3 p-8">
                   <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-full flex items-center justify-center mx-auto">
                     <ImageIcon className="w-8 h-8" />
                   </div>
-                  <div>
-                    <h3 className="font-bold text-sm">No Hostel Map Uploaded</h3>
-                    <p className="text-xs text-slate-400 max-w-sm mt-1">
-                      {sessionUser.role === 'admin'
-                        ? 'Click the "Upload Map Image" button above to upload an image of your hostel map.'
-                        : 'Please contact the hostel administrator to upload the layout map.'}
-                    </p>
-                  </div>
+                  <h3 className="font-bold text-sm">No Hostel Map Uploaded</h3>
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* VIEW 4: MASTER DIRECTORY */}
+        {/* TAB 3: MASTER DIRECTORY */}
         {activeTab === 'directory' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
           <div className="p-6 space-y-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h2 className="text-xl font-bold tracking-tight">Master Resident Directory</h2>
-                <p className="text-xs text-slate-500">Authorized view for resident profiles, room assignments, and fees.</p>
+                <p className="text-xs text-slate-500">Complete directory with room numbers, contact info, and fee status.</p>
               </div>
 
               {sessionUser.role === 'admin' && (
                 <button
                   onClick={() => {
-                    setEditingStudent({ name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Wing', room_no: '1', phone: '', father_name: '', address: '', fee_status: 'Paid', fee_amount: 45000, paid_amount: 45000, photo_url: '' });
+                    setEditingStudent({ 
+                      name: '', 
+                      roll_no: '', 
+                      course: 'MBBS', 
+                      batch: '2023', 
+                      block: 'Office Wing', 
+                      room_no: '1', 
+                      phone: '', 
+                      father_name: '', 
+                      joining_date: new Date().toISOString().split('T')[0],
+                      fee_status: 'Paid'
+                    });
                     setIsEditStudentModalOpen(true);
                   }}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
@@ -950,43 +1020,48 @@ export default function App() {
                     <th className="p-3">Roll / Batch</th>
                     <th className="p-3">Block & Room</th>
                     <th className="p-3">Phone</th>
-                    <th className="p-3">Fee Clearance</th>
+                    <th className="p-3">Father's Name</th>
+                    <th className="p-3">Joining Date</th>
+                    <th className="p-3">Fee Status</th>
                     <th className="p-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {filteredStudents.length > 0 ? (
                     filteredStudents.map(std => (
-                      <tr key={std.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition">
-                        <td className="p-3 flex items-center space-x-2.5">
-                          <img src={std.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-7 h-7 rounded-full object-cover border" alt={std.name} />
-                          <div>
-                            <p className="font-bold text-slate-800 dark:text-slate-100">{std.name}</p>
-                            <p className="text-[10px] text-slate-400">Father: {std.father_name || 'N/A'}</p>
-                          </div>
-                        </td>
+                      <tr 
+                        key={std.id} 
+                        className="hover:bg-indigo-50/40 dark:hover:bg-slate-900/50 cursor-pointer transition"
+                        onClick={() => setSelectedStudent(std)}
+                      >
+                        <td className="p-3 font-bold text-slate-800 dark:text-slate-100">{std.name}</td>
                         <td className="p-3 font-mono">
                           {std.roll_no || 'N/A'}
                           <span className="block text-[10px] font-sans text-slate-400">{std.course} • {std.batch}</span>
                         </td>
                         <td className="p-3 font-bold text-indigo-600">
-                          Room {std.room_no || std.roomNo}
+                          Room {std.room_no || std.roomNo || 'Unassigned'}
                           <span className="block text-[10px] text-slate-400 font-normal">{std.block}</span>
                         </td>
-                        <td className="p-3">{std.phone || 'N/A'}</td>
+                        <td className="p-3 font-mono">{std.phone || 'N/A'}</td>
+                        <td className="p-3">{std.father_name || 'N/A'}</td>
+                        <td className="p-3">{std.joining_date || 'N/A'}</td>
                         <td className="p-3">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            (std.fee_status || std.feeStatus) === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                            std.fee_status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
                           }`}>
-                            {std.fee_status || std.feeStatus}
+                            {std.fee_status || 'Pending'}
                           </span>
                         </td>
-                        <td className="p-3 text-right space-x-1">
-                          <button onClick={() => setSelectedStudent(std)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
+                        <td className="p-3 text-right space-x-1" onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => setSelectedStudent(std)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
                             <Eye className="w-3.5 h-3.5 text-slate-600" />
                           </button>
                           {sessionUser.role === 'admin' && (
-                            <button onClick={() => { setEditingStudent(std); setIsEditStudentModalOpen(true); }} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
+                            <button 
+                              onClick={() => { setEditingStudent(std); setIsEditStudentModalOpen(true); }} 
+                              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                            >
                               <Edit className="w-3.5 h-3.5 text-indigo-600" />
                             </button>
                           )}
@@ -995,9 +1070,7 @@ export default function App() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="6" className="p-8 text-center text-slate-400 italic">
-                        No resident records found.
-                      </td>
+                      <td colSpan="8" className="p-8 text-center text-slate-400 italic">No resident records found.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1006,200 +1079,546 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 5: USER APPROVAL DESK */}
+        {/* OTHER TABS (APPROVAL, TICKETS, IMPORTER, SQL) */}
         {activeTab === 'approval' && sessionUser.role === 'admin' && (
           <div className="p-6 space-y-4 max-w-4xl mx-auto">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight">Pending User Registrations</h2>
-              <p className="text-xs text-slate-500">Approve accounts and assign roles before users can view resident details.</p>
-            </div>
-
+            <h2 className="text-xl font-bold">Pending Registrations</h2>
             <div className="space-y-3">
-              {pendingStudents.length > 0 ? (
-                pendingStudents.map(user => (
-                  <div key={user.id} className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-sm`}>
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-bold text-sm">{user.name}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold uppercase">Pending</span>
-                      </div>
-                      <p className="text-xs text-slate-400">{user.email}</p>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => {
-                          setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'resident' } : s));
-                        }}
-                        className="px-3 py-1 bg-emerald-600 text-white font-bold text-xs rounded-lg shadow"
-                      >
-                        Approve Resident
-                      </button>
-                      <button
-                        onClick={() => {
-                          setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'authorized' } : s));
-                        }}
-                        className="px-3 py-1 bg-indigo-600 text-white font-bold text-xs rounded-lg shadow"
-                      >
-                        Make Staff
-                      </button>
-                    </div>
+              {pendingStudents.map(user => (
+                <div key={user.id} className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} flex justify-between items-center`}>
+                  <div>
+                    <p className="font-bold text-sm">{user.name}</p>
+                    <p className="text-xs text-slate-400">{user.email}</p>
                   </div>
-                ))
-              ) : (
-                <div className="p-8 text-center text-xs text-slate-400 border border-dashed rounded-2xl">
-                  No pending registration requests.
+                  <button
+                    onClick={() => setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'resident' } : s))}
+                    className="px-3 py-1 bg-emerald-600 text-white font-bold text-xs rounded-lg shadow"
+                  >
+                    Approve Resident
+                  </button>
                 </div>
-              )}
+              ))}
             </div>
           </div>
         )}
 
-        {/* VIEW 6: MAINTENANCE TICKETS */}
         {activeTab === 'tickets' && (
           <div className="p-6 space-y-4 max-w-4xl mx-auto">
             <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-xl font-bold tracking-tight">Hostel Maintenance Tickets</h2>
-                <p className="text-xs text-slate-500">File and track room repair requests.</p>
-              </div>
-              <button
-                onClick={() => setIsTicketModalOpen(true)}
-                className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold text-xs shadow"
-              >
-                + File New Ticket
-              </button>
+              <h2 className="text-xl font-bold">Maintenance Tickets</h2>
+              <button onClick={() => setIsTicketModalOpen(true)} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold text-xs shadow">+ New Ticket</button>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {complaints.length > 0 ? (
-                complaints.map(tkt => (
-                  <div key={tkt.id} className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-2 shadow-sm`}>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">{tkt.category}</span>
-                        <h4 className="font-bold text-sm mt-0.5">{tkt.title}</h4>
-                      </div>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                        tkt.status === 'Resolved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                      }`}>
-                        {tkt.status}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500">{tkt.description}</p>
-                  </div>
-                ))
-              ) : (
-                <div className="col-span-2 p-8 text-center text-xs text-slate-400 border border-dashed rounded-2xl">
-                  No maintenance tickets filed yet.
+              {complaints.map(tkt => (
+                <div key={tkt.id} className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-1`}>
+                  <h4 className="font-bold text-sm">{tkt.title}</h4>
+                  <p className="text-xs text-slate-500">{tkt.description}</p>
                 </div>
-              )}
+              ))}
             </div>
           </div>
         )}
 
-        {/* VIEW 7: GEMINI GOOGLE SHEET IMPORTER (ADMIN ONLY) */}
         {activeTab === 'importer' && sessionUser.role === 'admin' && (
-          <div className="p-6 max-w-4xl mx-auto space-y-5">
-            <div>
-              <div className="flex items-center space-x-2 text-amber-500 mb-1">
-                <Sparkles className="w-4 h-4" />
-                <span className="font-bold text-xs uppercase tracking-wider">Gemini AI Importer</span>
-              </div>
-              <h2 className="text-xl font-bold">Bulk Google Sheet Importer</h2>
-              <p className="text-xs text-slate-500 mt-1">Paste JSON generated from Gemini to bulk upload residents.</p>
-            </div>
-
-            <div className="space-y-2">
-              <textarea
-                id="jsonBulkArea"
-                rows={8}
-                placeholder={`[
-  {
-    "name": "Chitranjan Singh",
-    "course": "MBBS",
-    "batch": "2023",
-    "block": "Office Wing",
-    "room_no": "4",
-    "phone": "+91 98765 00000",
-    "father_name": "Rajendra Singh",
-    "fee_status": "Paid"
-  }
-]`}
-                className={`w-full p-3 font-mono text-xs rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-300'}`}
-              />
-              <button
-                onClick={() => {
-                  const el = document.getElementById('jsonBulkArea');
-                  if (!el || !el.value.trim()) return alert('Please paste JSON payload.');
-                  try {
-                    const parsed = JSON.parse(el.value);
-                    if (Array.isArray(parsed)) {
-                      const formatted = parsed.map((item, idx) => ({
-                        id: 'std_imp_' + Date.now() + '_' + idx,
-                        name: item.name || 'Unknown',
-                        roll_no: item.roll_no || `2023MBBS${idx + 100}`,
-                        course: item.course || 'MBBS',
-                        batch: item.batch || '2023',
-                        block: item.block || 'Office Wing',
-                        room_no: String(item.room_no || '1'),
-                        phone: item.phone || '',
-                        father_name: item.father_name || '',
-                        fee_status: item.fee_status || 'Paid',
-                        status: 'approved',
-                        role: 'resident'
-                      }));
-
-                      setStudents(prev => [...prev, ...formatted]);
-                      alert(`Imported ${formatted.length} resident records!`);
-                      el.value = '';
-                      setActiveTab('directory');
-                    }
-                  } catch (err) {
-                    alert('Invalid JSON: ' + err.message);
-                  }
-                }}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow text-xs flex items-center justify-center space-x-2"
-              >
-                <Upload className="w-4 h-4" />
-                <span>Parse & Append Records to Database</span>
-              </button>
-            </div>
+          <div className="p-6 max-w-4xl mx-auto space-y-4">
+            <h2 className="text-xl font-bold">Bulk Google Sheet Importer</h2>
+            <textarea id="jsonBulkArea" rows={8} className={`w-full p-3 font-mono text-xs rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-300'}`} placeholder={`[{"name":"Raj","course":"MBBS","batch":"2023","block":"Office Wing","room_no":"12","phone":"+91 9876543210","father_name":"R. K. Singh"}]`} />
+            <button
+              onClick={() => {
+                const el = document.getElementById('jsonBulkArea');
+                try {
+                  const parsed = JSON.parse(el.value);
+                  const formatted = parsed.map((item, idx) => ({
+                    id: 'std_imp_' + Date.now() + '_' + idx,
+                    name: item.name,
+                    roll_no: item.roll_no || `2023MBBS${idx + 100}`,
+                    course: item.course || 'MBBS',
+                    batch: item.batch || '2023',
+                    block: item.block || 'Office Wing',
+                    room_no: String(item.room_no || '1'),
+                    phone: item.phone || '',
+                    father_name: item.father_name || '',
+                    joining_date: item.joining_date || new Date().toISOString().split('T')[0],
+                    fee_status: item.fee_status || 'Paid',
+                    status: 'approved',
+                    role: 'resident',
+                    fee_ledger: [{ year: '2026-27', block: item.block || 'Office Wing', room_no: String(item.room_no || '1'), amount: 45000, paid: 45000, status: 'Paid', date: new Date().toISOString().split('T')[0] }],
+                    history: []
+                  }));
+                  setStudents(prev => [...prev, ...formatted]);
+                  alert(`Imported ${formatted.length} residents!`);
+                  setActiveTab('directory');
+                } catch(e) { alert('Invalid JSON'); }
+              }}
+              className="w-full py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs"
+            >
+              Parse & Append Records
+            </button>
           </div>
         )}
 
-        {/* VIEW 8: SUPABASE SQL GUIDE */}
         {activeTab === 'sql' && (
           <div className="p-6 max-w-4xl mx-auto space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-xl font-bold tracking-tight">Supabase PostgreSQL Schema Setup</h2>
-                <p className="text-xs text-slate-500">Run this query in your Supabase SQL Editor.</p>
-              </div>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-                  alert('SQL Schema copied to clipboard!');
-                }}
-                className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy SQL</span>
-              </button>
-            </div>
-
+            <h2 className="text-xl font-bold">Supabase PostgreSQL Schema</h2>
             <pre className="p-4 rounded-xl bg-slate-900 text-slate-200 text-xs font-mono overflow-x-auto border border-slate-800 leading-relaxed max-h-[60vh]">
               {SUPABASE_SQL_SCHEMA}
             </pre>
           </div>
         )}
-
       </main>
 
-      {/* EDIT BED CAPACITY MODAL (ADMIN ONLY) */}
+      {/* MODAL 1: FULL EDIT RESIDENT FORM (ADMIN ONLY) */}
+      {isEditStudentModalOpen && editingStudent && sessionUser.role === 'admin' && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <form onSubmit={handleSaveStudent} className={`w-full max-w-lg rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl my-8`}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-base">{editingStudent.id ? 'Edit Resident Profile' : 'Register New Resident'}</h3>
+              <button type="button" onClick={() => setIsEditStudentModalOpen(false)}><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="col-span-2">
+                <label className="font-bold block mb-1 text-slate-500">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingStudent.name || ''}
+                  onChange={e => setEditingStudent({ ...editingStudent, name: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Phone Number</label>
+                <input
+                  type="text"
+                  placeholder="+91 98765 43210"
+                  value={editingStudent.phone || ''}
+                  onChange={e => setEditingStudent({ ...editingStudent, phone: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Father's Name</label>
+                <input
+                  type="text"
+                  value={editingStudent.father_name || ''}
+                  onChange={e => setEditingStudent({ ...editingStudent, father_name: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Roll Number</label>
+                <input
+                  type="text"
+                  value={editingStudent.roll_no || ''}
+                  onChange={e => setEditingStudent({ ...editingStudent, roll_no: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Course & Batch</label>
+                <div className="flex space-x-2">
+                  <select
+                    value={editingStudent.course || 'MBBS'}
+                    onChange={e => setEditingStudent({ ...editingStudent, course: e.target.value })}
+                    className={`w-1/2 p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                  >
+                    <option value="MBBS">MBBS</option>
+                    <option value="BDS">BDS</option>
+                    <option value="MD/MS">MD/MS</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Batch"
+                    value={editingStudent.batch || '2023'}
+                    onChange={e => setEditingStudent({ ...editingStudent, batch: e.target.value })}
+                    className={`w-1/2 p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Block</label>
+                <select
+                  value={editingStudent.block || 'Office Wing'}
+                  onChange={e => setEditingStudent({ ...editingStudent, block: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                >
+                  {HOSTEL_BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Room Number</label>
+                <input
+                  type="text"
+                  value={editingStudent.room_no || ''}
+                  onChange={e => setEditingStudent({ ...editingStudent, room_no: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Room Joining Date</label>
+                <input
+                  type="date"
+                  value={editingStudent.joining_date || new Date().toISOString().split('T')[0]}
+                  onChange={e => setEditingStudent({ ...editingStudent, joining_date: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Current Year Fee Status</label>
+                <select
+                  value={editingStudent.fee_status || 'Paid'}
+                  onChange={e => setEditingStudent({ ...editingStudent, fee_status: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                >
+                  <option value="Paid">Paid</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Partial">Partial</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
+              <button type="submit" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow">
+                Save Record
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL 2: FULL RESIDENT COMPREHENSIVE PROFILE INSPECTOR */}
+      {selectedStudent && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className={`w-full max-w-2xl rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-5 shadow-2xl my-8`}>
+            
+            {/* Header */}
+            <div className="flex justify-between items-start pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center space-x-4">
+                <div className="w-14 h-14 bg-indigo-600 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-md">
+                  {selectedStudent.name.charAt(0)}
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg leading-tight">{selectedStudent.name}</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{selectedStudent.course} • Batch {selectedStudent.batch} • Roll: {selectedStudent.roll_no || 'N/A'}</p>
+                </div>
+              </div>
+              <button onClick={() => setSelectedStudent(null)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+
+            {/* Quick Info Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-indigo-50/50 dark:bg-slate-900 border border-indigo-100 dark:border-slate-800">
+                <span className="text-slate-400 block font-medium">Allocated Room</span>
+                <span className="font-black text-indigo-600 dark:text-indigo-400 text-sm">{selectedStudent.block}, Rm {selectedStudent.room_no}</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <span className="text-slate-400 block font-medium">Joining Date</span>
+                <span className="font-bold">{selectedStudent.joining_date || 'N/A'}</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <span className="text-slate-400 block font-medium">Phone Number</span>
+                <span className="font-bold">{selectedStudent.phone || 'N/A'}</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <span className="text-slate-400 block font-medium">Father's Name</span>
+                <span className="font-bold truncate block">{selectedStudent.father_name || 'N/A'}</span>
+              </div>
+            </div>
+
+            {/* Section 1: Year-Wise Fee History Ledger */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <h4 className="font-bold text-xs uppercase text-indigo-500 tracking-wider flex items-center space-x-1.5">
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>Year-Wise Fee History & Room Ledger</span>
+                </h4>
+
+                {sessionUser.role === 'admin' && (
+                  <button
+                    onClick={() => setIsNewFeeEntryModalOpen(true)}
+                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-[11px] shadow flex items-center space-x-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Add Fee Record</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                <table className="w-full text-left text-[11px]">
+                  <thead className="bg-slate-100 dark:bg-slate-900 font-bold uppercase text-slate-500">
+                    <tr>
+                      <th className="p-2">Academic Session</th>
+                      <th className="p-2">Room Assigned</th>
+                      <th className="p-2">Fee Due</th>
+                      <th className="p-2">Amount Paid</th>
+                      <th className="p-2">Status</th>
+                      <th className="p-2">Payment Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {selectedStudent.fee_ledger && selectedStudent.fee_ledger.length > 0 ? (
+                      selectedStudent.fee_ledger.map((ledger, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+                          <td className="p-2 font-bold">{ledger.year}</td>
+                          <td className="p-2 font-semibold text-indigo-600">{ledger.block}, Rm {ledger.room_no}</td>
+                          <td className="p-2">₹{ledger.amount}</td>
+                          <td className="p-2 font-bold text-emerald-600">₹{ledger.paid}</td>
+                          <td className="p-2">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-black ${
+                              ledger.status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                            }`}>
+                              {ledger.status}
+                            </span>
+                          </td>
+                          <td className="p-2 text-slate-400">{ledger.date || 'N/A'}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="6" className="p-4 text-center text-slate-400 italic">No year-wise fee entries recorded yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Section 2: Room Stay & Movement History */}
+            <div className="space-y-2">
+              <h4 className="font-bold text-xs uppercase text-indigo-500 tracking-wider flex items-center space-x-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                <span>Room Stay & Movement Timeline</span>
+              </h4>
+
+              <div className="space-y-2 max-h-36 overflow-y-auto">
+                {selectedStudent.history && selectedStudent.history.length > 0 ? (
+                  selectedStudent.history.map((hist, idx) => (
+                    <div key={idx} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs flex justify-between items-center">
+                      <div>
+                        <p className="font-bold text-slate-800 dark:text-slate-100">
+                          Moved from {hist.oldBlock} (Rm {hist.oldRoom}) → {hist.newBlock} (Rm {hist.newRoom})
+                        </p>
+                        <p className="text-[10px] text-slate-400">{hist.reason || 'Annual Allocation'}</p>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-950 px-2 py-1 rounded-lg">
+                        {hist.date}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-400 italic p-3 text-center border border-dashed rounded-xl">
+                    No previous room transfers recorded for this resident.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            {sessionUser.role === 'admin' && (
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between">
+                <button
+                  onClick={() => {
+                    setTransferData({ 
+                      studentId: selectedStudent.id, 
+                      targetBlock: 'Office Wing', 
+                      targetRoom: '1', 
+                      transferDate: new Date().toISOString().split('T')[0],
+                      academicYear: '2026-27',
+                      reason: 'Annual Re-allocation' 
+                    });
+                    setIsTransferModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 rounded-xl font-bold text-xs shadow-sm flex items-center space-x-1"
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>Transfer Room & Update Session</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setEditingStudent(selectedStudent);
+                    setIsEditStudentModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow"
+                >
+                  Edit Profile Fields
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: ADD YEAR-WISE FEE ENTRY (ADMIN ONLY) */}
+      {isNewFeeEntryModalOpen && selectedStudent && sessionUser.role === 'admin' && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={handleAddFeeEntry} className={`w-full max-w-sm rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-base">Add Year-Wise Fee Record</h3>
+              <button type="button" onClick={() => setIsNewFeeEntryModalOpen(false)}><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Academic Year / Session</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 2026-27"
+                  value={newFeeEntry.academicYear}
+                  onChange={e => setNewFeeEntry({ ...newFeeEntry, academicYear: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Total Fee Amount (₹)</label>
+                <input
+                  type="number"
+                  required
+                  value={newFeeEntry.amount}
+                  onChange={e => setNewFeeEntry({ ...newFeeEntry, amount: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Paid Amount (₹)</label>
+                <input
+                  type="number"
+                  required
+                  value={newFeeEntry.paid}
+                  onChange={e => setNewFeeEntry({ ...newFeeEntry, paid: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Status</label>
+                <select
+                  value={newFeeEntry.status}
+                  onChange={e => setNewFeeEntry({ ...newFeeEntry, status: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                >
+                  <option value="Paid">Paid</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Partial">Partial</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Payment Date</label>
+                <input
+                  type="date"
+                  value={newFeeEntry.paymentDate}
+                  onChange={e => setNewFeeEntry({ ...newFeeEntry, paymentDate: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
+                Save Fee Entry
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL 4: TRANSFER ROOM WITH DATES (ADMIN ONLY) */}
+      {isTransferModalOpen && sessionUser.role === 'admin' && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={handleExecuteTransfer} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-base">Re-assign Room & Log History</h3>
+              <button type="button" onClick={() => setIsTransferModalOpen(false)}><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Target Block</label>
+                <select
+                  value={transferData.targetBlock}
+                  onChange={e => setTransferData({ ...transferData, targetBlock: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                >
+                  {HOSTEL_BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">New Room Number</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 53"
+                  value={transferData.targetRoom}
+                  onChange={e => setTransferData({ ...transferData, targetRoom: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Transfer Date</label>
+                <input
+                  type="date"
+                  required
+                  value={transferData.transferDate}
+                  onChange={e => setTransferData({ ...transferData, transferDate: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Academic Year Session</label>
+                <input
+                  type="text"
+                  required
+                  value={transferData.academicYear}
+                  onChange={e => setTransferData({ ...transferData, academicYear: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-slate-500">Reason / Remarks</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Annual Year Swap"
+                  value={transferData.reason}
+                  onChange={e => setTransferData({ ...transferData, reason: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                />
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
+                Confirm Transfer & Update Ledger
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL 5: EDIT BEDS CAPACITY */}
       {isBedCapacityModalOpen && sessionUser.role === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className={`w-full max-w-sm rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
+          <div className={`w-full max-w-sm rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
               <h3 className="font-bold text-base">Edit Total Beds Capacity</h3>
               <button onClick={() => setIsBedCapacityModalOpen(false)}><X className="w-5 h-5" /></button>
@@ -1211,7 +1630,7 @@ export default function App() {
                 type="number"
                 value={tempBedCapacity}
                 onChange={e => setTempBedCapacity(parseInt(e.target.value, 10) || 0)}
-                className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}
+                className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
               />
             </div>
 
@@ -1230,141 +1649,7 @@ export default function App() {
         </div>
       )}
 
-      {/* ADD/EDIT RESIDENT MODAL (ADMIN ONLY) */}
-      {isEditStudentModalOpen && editingStudent && sessionUser.role === 'admin' && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleSaveStudent} className={`w-full max-w-lg rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
-            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
-              <h3 className="font-bold text-base">{editingStudent.id ? 'Edit Resident' : 'Register New Resident'}</h3>
-              <button type="button" onClick={() => setIsEditStudentModalOpen(false)}><X className="w-5 h-5" /></button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="col-span-2">
-                <label className="font-bold block mb-1">Full Name</label>
-                <input
-                  type="text"
-                  required
-                  value={editingStudent.name || ''}
-                  onChange={e => setEditingStudent({ ...editingStudent, name: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">Block</label>
-                <select
-                  value={editingStudent.block || 'Office Wing'}
-                  onChange={e => setEditingStudent({ ...editingStudent, block: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                >
-                  {HOSTEL_BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">Room Number</label>
-                <input
-                  type="text"
-                  value={editingStudent.room_no || ''}
-                  onChange={e => setEditingStudent({ ...editingStudent, room_no: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">Save Record</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* RESIDENT INSPECTOR MODAL */}
-      {selectedStudent && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className={`w-full max-w-lg rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
-            <div className="flex justify-between items-start pb-2 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center space-x-3">
-                <img src={selectedStudent.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-12 h-12 rounded-full object-cover border-2 border-indigo-500" alt={selectedStudent.name} />
-                <div>
-                  <h3 className="font-bold text-base">{selectedStudent.name}</h3>
-                  <p className="text-xs text-slate-400">{selectedStudent.course} • Batch {selectedStudent.batch}</p>
-                </div>
-              </div>
-              <button onClick={() => setSelectedStudent(null)}><X className="w-5 h-5" /></button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-900">
-                <span className="text-slate-400 block font-medium">Block & Room</span>
-                <span className="font-bold text-indigo-600">{selectedStudent.block}, Room {selectedStudent.room_no || selectedStudent.roomNo}</span>
-              </div>
-              <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-900">
-                <span className="text-slate-400 block font-medium">Father's Name</span>
-                <span className="font-bold">{selectedStudent.father_name || 'N/A'}</span>
-              </div>
-            </div>
-
-            {sessionUser.role === 'admin' && (
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between">
-                <button
-                  onClick={() => {
-                    setTransferData({ studentId: selectedStudent.id, targetBlock: 'Office Wing', targetRoom: '1', reason: 'Official Swap' });
-                    setIsTransferModalOpen(true);
-                  }}
-                  className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-lg font-bold text-xs"
-                >
-                  Transfer Room
-                </button>
-                <button onClick={() => setSelectedStudent(null)} className="px-4 py-1.5 bg-slate-200 dark:bg-slate-800 font-semibold rounded-lg text-xs">Close</button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* TRANSFER ROOM MODAL (ADMIN ONLY) */}
-      {isTransferModalOpen && sessionUser.role === 'admin' && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleExecuteTransfer} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
-            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
-              <h3 className="font-bold text-base">Re-assign Room & Log History</h3>
-              <button type="button" onClick={() => setIsTransferModalOpen(false)}><X className="w-5 h-5" /></button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold block mb-1">Target Block</label>
-                <select
-                  value={transferData.targetBlock}
-                  onChange={e => setTransferData({ ...transferData, targetBlock: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                >
-                  {HOSTEL_BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">Target Room Number</label>
-                <input
-                  type="text"
-                  required
-                  value={transferData.targetRoom}
-                  onChange={e => setTransferData({ ...transferData, targetRoom: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">Confirm Transfer</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* CREATE TICKET MODAL */}
+      {/* MODAL 6: CREATE MAINTENANCE TICKET */}
       {isTicketModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={(e) => {
@@ -1382,7 +1667,7 @@ export default function App() {
             };
             setComplaints(prev => [ticket, ...prev]);
             setIsTicketModalOpen(false);
-          }} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
+          }} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
               <h3 className="font-bold text-base">File Maintenance Ticket</h3>
               <button type="button" onClick={() => setIsTicketModalOpen(false)}><X className="w-5 h-5" /></button>
@@ -1390,7 +1675,7 @@ export default function App() {
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="font-bold block mb-1">Title</label>
+                <label className="font-bold block mb-1 text-slate-500">Title</label>
                 <input
                   type="text"
                   required
@@ -1401,7 +1686,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="font-bold block mb-1">Description</label>
+                <label className="font-bold block mb-1 text-slate-500">Description</label>
                 <textarea
                   rows={3}
                   required
@@ -1413,7 +1698,9 @@ export default function App() {
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">Submit Ticket</button>
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
+                Submit Ticket
+              </button>
             </div>
           </form>
         </div>
