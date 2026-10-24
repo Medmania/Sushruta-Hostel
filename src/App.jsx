@@ -4,7 +4,8 @@ import {
   Building2, Users, Search, Plus, UserCheck, 
   BedDouble, Wrench, Clock, Edit, MapPin, 
   Moon, Sun, Sparkles, X, Eye, 
-  Upload, Database, Copy, Settings, LogOut, Lock, Mail
+  Upload, Database, Copy, Settings, LogOut, Lock, Mail,
+  Map, Image as ImageIcon, Trash2
 } from 'lucide-react';
 
 // --- DEFAULT CONFIGURATION ---
@@ -14,7 +15,6 @@ const DEFAULT_CONFIG = {
   googleClientId: '',
   googleAppsScriptUrl: ''
 };
-
 
 // --- READY-TO-RUN SUPABASE SQL SCHEMA & RLS POLICIES ---
 const SUPABASE_SQL_SCHEMA = `-- 1. CREATE ENUMS
@@ -113,7 +113,19 @@ export default function App() {
   // --- DARK MODE STATE ---
   const [darkMode, setDarkMode] = useState(false);
 
-  // --- LOCAL STORES ---
+  // --- LOCAL STORES & CAPACITY SETTINGS ---
+  const [totalBedsCapacity, setTotalBedsCapacity] = useState(() => {
+    const saved = localStorage.getItem('obh_total_beds');
+    return saved ? parseInt(saved, 10) : 150;
+  });
+  const [isBedCapacityModalOpen, setIsBedCapacityModalOpen] = useState(false);
+  const [tempBedCapacity, setTempBedCapacity] = useState(totalBedsCapacity);
+
+  // --- HOSTEL MAP STATE ---
+  const [hostelMapUrl, setHostelMapUrl] = useState(() => {
+    return localStorage.getItem('obh_hostel_map') || '';
+  });
+
   const [students, setStudents] = useState(() => {
     const saved = localStorage.getItem('obh_db_students');
     return saved ? JSON.parse(saved) : [];
@@ -143,6 +155,18 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('obh_app_config', JSON.stringify(config));
   }, [config]);
+
+  useEffect(() => {
+    localStorage.setItem('obh_total_beds', totalBedsCapacity.toString());
+  }, [totalBedsCapacity]);
+
+  useEffect(() => {
+    if (hostelMapUrl) {
+      localStorage.setItem('obh_hostel_map', hostelMapUrl);
+    } else {
+      localStorage.removeItem('obh_hostel_map');
+    }
+  }, [hostelMapUrl]);
 
   useEffect(() => {
     localStorage.setItem('obh_db_students', JSON.stringify(students));
@@ -175,12 +199,10 @@ export default function App() {
 
   // Fetch or create profile row in local database / Supabase
   const syncUserProfile = (authUser) => {
-    // Check if user exists in local students database or create user object
     const existing = students.find(s => s.email === authUser.email);
     if (existing) {
       setSessionUser(existing);
     } else {
-      // Check if admin email or standard user
       const isFirstAdmin = students.length === 0 || authUser.email.includes('admin');
       const newUser = {
         id: authUser.id,
@@ -206,7 +228,6 @@ export default function App() {
     setAuthLoading(true);
 
     if (!supabase) {
-      // Offline fallback mode for local testing before connecting Supabase
       const isFirst = students.length === 0 || loginEmail.includes('admin');
       const mockUser = {
         id: 'usr_' + Date.now(),
@@ -264,12 +285,30 @@ export default function App() {
     setSessionUser(null);
   };
 
+  // --- MAP UPLOAD HANDLER ---
+  const handleMapFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size exceeds 5MB. Please upload a smaller image.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setHostelMapUrl(reader.result);
+      alert('Hostel map image uploaded successfully!');
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Derived Statistics
   const approvedStudents = useMemo(() => students.filter(s => s.status === 'approved'), [students]);
   const pendingStudents = useMemo(() => students.filter(s => s.status === 'pending'), [students]);
 
   const stats = useMemo(() => {
-    const totalBeds = 150;
+    const totalBeds = totalBedsCapacity;
     const occupiedBeds = approvedStudents.length;
     const vacantBeds = Math.max(0, totalBeds - occupiedBeds);
     const bdsCount = approvedStudents.filter(s => s.course === 'BDS').length;
@@ -277,7 +316,7 @@ export default function App() {
     const feePendingCount = approvedStudents.filter(s => (s.fee_status || s.feeStatus) !== 'Paid').length;
 
     return { totalBeds, occupiedBeds, vacantBeds, bdsCount, mbbsCount, feePendingCount };
-  }, [approvedStudents]);
+  }, [approvedStudents, totalBedsCapacity]);
 
   // Filtered Students List
   const filteredStudents = useMemo(() => {
@@ -511,7 +550,7 @@ export default function App() {
             </div>
             <button
               onClick={() => setDarkMode(!darkMode)}
-              className="md:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
@@ -539,7 +578,17 @@ export default function App() {
                     className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'grid' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                   >
                     <BedDouble className="w-4 h-4" />
-                    <span>Hostel Grid & Map</span>
+                    <span>Hostel Grid & Rooms</span>
+                  </button>
+                )}
+
+                {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                  <button
+                    onClick={() => setActiveTab('map')}
+                    className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'map' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                  >
+                    <Map className="w-4 h-4" />
+                    <span>Hostel Layout Map</span>
                   </button>
                 )}
 
@@ -619,8 +668,22 @@ export default function App() {
         {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
           <div className={`p-4 border-b ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
-                <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Est. Beds</p>
+              <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 relative group">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Est. Beds</p>
+                  {sessionUser.role === 'admin' && (
+                    <button
+                      onClick={() => {
+                        setTempBedCapacity(totalBedsCapacity);
+                        setIsBedCapacityModalOpen(true);
+                      }}
+                      className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 p-0.5"
+                      title="Edit Total Beds Capacity"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
                 <p className="text-xl font-black mt-0.5">{stats.totalBeds}</p>
               </div>
               <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
@@ -793,6 +856,66 @@ export default function App() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* VIEW 3.5: HOSTEL LAYOUT MAP */}
+        {activeTab === 'map' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
+          <div className="p-6 space-y-4 max-w-5xl mx-auto">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h2 className="text-xl font-bold tracking-tight">Hostel Floor Plan & Layout Map</h2>
+                <p className="text-xs text-slate-500">Official architectural layout and room distribution map.</p>
+              </div>
+
+              {sessionUser.role === 'admin' && (
+                <div className="flex items-center space-x-2">
+                  <label className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1.5 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload Map Image</span>
+                    <input type="file" accept="image/*" onChange={handleMapFileUpload} className="hidden" />
+                  </label>
+
+                  {hostelMapUrl && (
+                    <button
+                      onClick={() => {
+                        if (confirm('Are you sure you want to remove the current hostel map?')) {
+                          setHostelMapUrl('');
+                        }
+                      }}
+                      className="p-1.5 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 rounded-lg text-xs"
+                      title="Delete Map"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm min-h-[400px] flex items-center justify-center`}>
+              {hostelMapUrl ? (
+                <img
+                  src={hostelMapUrl}
+                  alt="Hostel Layout Map"
+                  className="w-full h-auto max-h-[75vh] object-contain rounded-xl"
+                />
+              ) : (
+                <div className="text-center space-y-3 p-8">
+                  <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-full flex items-center justify-center mx-auto">
+                    <ImageIcon className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm">No Hostel Map Uploaded</h3>
+                    <p className="text-xs text-slate-400 max-w-sm mt-1">
+                      {sessionUser.role === 'admin'
+                        ? 'Click the "Upload Map Image" button above to upload an image of your hostel map.'
+                        : 'Please contact the hostel administrator to upload the layout map.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1072,6 +1195,40 @@ export default function App() {
         )}
 
       </main>
+
+      {/* EDIT BED CAPACITY MODAL (ADMIN ONLY) */}
+      {isBedCapacityModalOpen && sessionUser.role === 'admin' && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-base">Edit Total Beds Capacity</h3>
+              <button onClick={() => setIsBedCapacityModalOpen(false)}><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <label className="font-bold block text-slate-500">Total Available Beds</label>
+              <input
+                type="number"
+                value={tempBedCapacity}
+                onChange={e => setTempBedCapacity(parseInt(e.target.value, 10) || 0)}
+                className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'}`}
+              />
+            </div>
+
+            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
+              <button
+                onClick={() => {
+                  setTotalBedsCapacity(tempBedCapacity);
+                  setIsBedCapacityModalOpen(false);
+                }}
+                className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow"
+              >
+                Save Capacity
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ADD/EDIT RESIDENT MODAL (ADMIN ONLY) */}
       {isEditStudentModalOpen && editingStudent && sessionUser.role === 'admin' && (
