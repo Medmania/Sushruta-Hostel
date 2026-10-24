@@ -9,8 +9,8 @@ import {
 
 // --- DEFAULT CONFIGURATION ---
 const DEFAULT_CONFIG = {
-  supabaseUrl: localStorage.getItem('obh_supabase_url') || '',
-  supabaseAnonKey: localStorage.getItem('obh_supabase_key') || '',
+  supabaseUrl: localStorage.getItem('https://fojauvqvrqarxtwyrmtg.supabase.co') || '',
+  supabaseAnonKey: localStorage.getItem('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvamF1dnF2cnFhcnh0d3lybXRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4NjczMDcsImV4cCI6MjEwODQ0MzMwN30.X9nNRtP2Q2AteCZXRYWPmADReq7Y5u9rxq5UortTtXA') || '',
   googleClientId: '',
   googleAppsScriptUrl: ''
 };
