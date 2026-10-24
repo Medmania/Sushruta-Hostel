@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { 
   Building2, Users, Search, Plus, UserCheck, 
   BedDouble, Wrench, Clock, Edit, MapPin, 
   Moon, Sun, Sparkles, X, Eye, 
-  Upload, Database, Copy, Settings
+  Upload, Database, Copy, Settings, LogOut, Lock, Mail
 } from 'lucide-react';
 
-// --- DEFAULT CONFIGURATION SKELETON ---
+// --- DEFAULT CONFIGURATION ---
 const DEFAULT_CONFIG = {
-  supabaseUrl: '',
-  supabaseAnonKey: '',
+  supabaseUrl: localStorage.getItem('obh_supabase_url') || '',
+  supabaseAnonKey: localStorage.getItem('obh_supabase_key') || '',
   googleClientId: '',
   googleAppsScriptUrl: ''
 };
@@ -44,17 +45,7 @@ CREATE TABLE profiles (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. CREATE ROOMS TABLE
-CREATE TABLE rooms (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  room_no TEXT NOT NULL,
-  block TEXT NOT NULL,
-  capacity INT DEFAULT 2,
-  type TEXT DEFAULT 'Standard Double',
-  UNIQUE(room_no, block)
-);
-
--- 4. CREATE ROOM HISTORY TABLE (Audit Trail for Room Transfers)
+-- 3. CREATE ROOM HISTORY TABLE
 CREATE TABLE room_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   student_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
@@ -67,7 +58,7 @@ CREATE TABLE room_history (
   updated_by TEXT
 );
 
--- 5. CREATE MAINTENANCE TICKETS TABLE
+-- 4. CREATE MAINTENANCE TICKETS TABLE
 CREATE TABLE maintenance_tickets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   student_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
@@ -82,64 +73,10 @@ CREATE TABLE maintenance_tickets (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. ENABLE ROW LEVEL SECURITY (RLS)
+-- 5. ENABLE ROW LEVEL SECURITY (RLS)
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE room_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE maintenance_tickets ENABLE ROW LEVEL SECURITY;
-
--- 7. RLS POLICIES FOR PROFILES
-CREATE POLICY "Residents read own profile" ON profiles
-  FOR SELECT USING (auth.uid() = auth_id AND status = 'approved');
-
-CREATE POLICY "Admins full access on profiles" ON profiles
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE auth_id = auth.uid() 
-      AND role IN ('admin', 'authorized') 
-      AND status = 'approved'
-    )
-  );
-
--- 8. RLS POLICIES FOR ROOM HISTORY
-CREATE POLICY "Residents read own history" ON room_history
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE id = room_history.student_id 
-      AND auth_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Admins full access on room_history" ON room_history
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE auth_id = auth.uid() 
-      AND role IN ('admin', 'authorized') 
-      AND status = 'approved'
-    )
-  );
-
--- 9. RLS POLICIES FOR TICKETS
-CREATE POLICY "Residents read and create own tickets" ON maintenance_tickets
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE id = maintenance_tickets.student_id 
-      AND auth_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Admins manage all tickets" ON maintenance_tickets
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE auth_id = auth.uid() 
-      AND role IN ('admin', 'authorized') 
-      AND status = 'approved'
-    )
-  );`;
+ALTER TABLE maintenance_tickets ENABLE ROW LEVEL SECURITY;`;
 
 const HOSTEL_BLOCKS = ['Office Wing', 'Mathura (North)', 'Mathura (South)', 'Tennis Block'];
 
@@ -151,10 +88,31 @@ export default function App() {
   });
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
+  // Initialize Supabase Client dynamically
+  const supabase = useMemo(() => {
+    if (config.supabaseUrl && config.supabaseAnonKey) {
+      try {
+        return createClient(config.supabaseUrl, config.supabaseAnonKey);
+      } catch (e) {
+        console.error("Supabase init error:", e);
+        return null;
+      }
+    }
+    return null;
+  }, [config.supabaseUrl, config.supabaseAnonKey]);
+
+  // --- AUTH & SESSION STATE ---
+  const [sessionUser, setSessionUser] = useState(null); // null when logged out
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [isSigningUp, setIsSigningUp] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
   // --- DARK MODE STATE ---
   const [darkMode, setDarkMode] = useState(false);
 
-  // --- DATA STORES ---
+  // --- LOCAL STORES ---
   const [students, setStudents] = useState(() => {
     const saved = localStorage.getItem('obh_db_students');
     return saved ? JSON.parse(saved) : [];
@@ -163,20 +121,6 @@ export default function App() {
   const [complaints, setComplaints] = useState(() => {
     const saved = localStorage.getItem('obh_db_complaints');
     return saved ? JSON.parse(saved) : [];
-  });
-
-  // --- AUTH & ACTIVE USER SESSION ---
-  const [currentSession, setCurrentSession] = useState({
-    isAuthenticated: true,
-    user: {
-      id: 'session_admin_01',
-      name: 'Hostel Admin',
-      email: 'admin@hostel.edu',
-      role: 'admin',
-      status: 'approved',
-      block: 'Office Wing',
-      roomNo: '12'
-    }
   });
 
   // Navigation Tab
@@ -193,12 +137,8 @@ export default function App() {
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterBlock] = useState('All');
-  const [filterBatch] = useState('All');
-  const [filterCourse] = useState('All');
-  const [filterFee] = useState('All');
 
-  // LocalStorage Persistence
+  // LocalStorage Sync
   useEffect(() => {
     localStorage.setItem('obh_app_config', JSON.stringify(config));
   }, [config]);
@@ -211,6 +151,118 @@ export default function App() {
     localStorage.setItem('obh_db_complaints', JSON.stringify(complaints));
   }, [complaints]);
 
+  // --- REAL AUTH LISTENER ---
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        syncUserProfile(session.user);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        syncUserProfile(session.user);
+      } else {
+        setSessionUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  // Fetch or create profile row in local database / Supabase
+  const syncUserProfile = (authUser) => {
+    // Check if user exists in local students database or create user object
+    const existing = students.find(s => s.email === authUser.email);
+    if (existing) {
+      setSessionUser(existing);
+    } else {
+      // Check if admin email or standard user
+      const isFirstAdmin = students.length === 0 || authUser.email.includes('admin');
+      const newUser = {
+        id: authUser.id,
+        email: authUser.email,
+        name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
+        role: isFirstAdmin ? 'admin' : 'resident',
+        status: isFirstAdmin ? 'approved' : 'pending',
+        course: 'MBBS',
+        batch: '2023',
+        block: 'Office Wing',
+        room_no: 'Unassigned',
+        fee_status: 'Pending'
+      };
+      setSessionUser(newUser);
+      setStudents(prev => [...prev, newUser]);
+    }
+  };
+
+  // --- HANDLERS FOR LOGIN & GOOGLE AUTH ---
+  const handleEmailAuth = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    if (!supabase) {
+      // Offline fallback mode for local testing before connecting Supabase
+      const isFirst = students.length === 0 || loginEmail.includes('admin');
+      const mockUser = {
+        id: 'usr_' + Date.now(),
+        email: loginEmail,
+        name: loginEmail.split('@')[0],
+        role: isFirst ? 'admin' : 'resident',
+        status: isFirst ? 'approved' : 'pending',
+        course: 'MBBS',
+        batch: '2023',
+        block: 'Office Wing',
+        room_no: '10',
+        fee_status: 'Paid'
+      };
+      setSessionUser(mockUser);
+      if (!students.some(s => s.email === loginEmail)) {
+        setStudents(prev => [...prev, mockUser]);
+      }
+      setAuthLoading(false);
+      return;
+    }
+
+    try {
+      if (isSigningUp) {
+        const { error } = await supabase.auth.signUp({ email: loginEmail, password: loginPassword });
+        if (error) throw error;
+        alert('Registration link sent! Please check your email to verify your account.');
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword });
+        if (error) throw error;
+      }
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (!supabase) {
+      alert('Please configure your SUPABASE_URL and SUPABASE_ANON_KEY first using the settings button in the bottom left corner!');
+      setIsConfigOpen(true);
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin }
+    });
+
+    if (error) setAuthError(error.message);
+  };
+
+  const handleLogout = async () => {
+    if (supabase) await supabase.auth.signOut();
+    setSessionUser(null);
+  };
+
   // Derived Statistics
   const approvedStudents = useMemo(() => students.filter(s => s.status === 'approved'), [students]);
   const pendingStudents = useMemo(() => students.filter(s => s.status === 'pending'), [students]);
@@ -221,7 +273,7 @@ export default function App() {
     const vacantBeds = Math.max(0, totalBeds - occupiedBeds);
     const bdsCount = approvedStudents.filter(s => s.course === 'BDS').length;
     const mbbsCount = approvedStudents.filter(s => s.course === 'MBBS').length;
-    const feePendingCount = approvedStudents.filter(s => s.fee_status !== 'Paid' && s.feeStatus !== 'Paid').length;
+    const feePendingCount = approvedStudents.filter(s => (s.fee_status || s.feeStatus) !== 'Paid').length;
 
     return { totalBeds, occupiedBeds, vacantBeds, bdsCount, mbbsCount, feePendingCount };
   }, [approvedStudents]);
@@ -231,22 +283,18 @@ export default function App() {
     return approvedStudents.filter(s => {
       const roomVal = s.room_no || s.roomNo || '';
       const rollVal = s.roll_no || '';
-      const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            roomVal.includes(searchQuery) ||
-                            rollVal.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            (s.phone && s.phone.includes(searchQuery));
-      const matchesBlock = filterBlock === 'All' || s.block === filterBlock;
-      const matchesBatch = filterBatch === 'All' || s.batch === filterBatch;
-      const matchesCourse = filterCourse === 'All' || s.course === filterCourse;
-      const matchesFee = filterFee === 'All' || (s.fee_status || s.feeStatus) === filterFee;
-
-      return matchesSearch && matchesBlock && matchesBatch && matchesCourse && matchesFee;
+      return s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+             roomVal.includes(searchQuery) ||
+             rollVal.toLowerCase().includes(searchQuery.toLowerCase()) ||
+             (s.phone && s.phone.includes(searchQuery));
     });
-  }, [approvedStudents, searchQuery, filterBlock, filterBatch, filterCourse, filterFee]);
+  }, [approvedStudents, searchQuery]);
 
-  // Save / Add Student
+  // Save / Add Resident (ADMIN ONLY)
   const handleSaveStudent = (e) => {
     e.preventDefault();
+    if (sessionUser?.role !== 'admin') return alert('Access Denied: Only Admins can register or modify residents.');
+
     if (editingStudent.id) {
       setStudents(prev => prev.map(s => s.id === editingStudent.id ? editingStudent : s));
     } else {
@@ -255,7 +303,7 @@ export default function App() {
         id: 'std_' + Date.now(),
         status: 'approved',
         history: [{
-          roomNo: editingStudent.room_no || editingStudent.roomNo || 'Unassigned',
+          roomNo: editingStudent.room_no || 'Unassigned',
           block: editingStudent.block || 'Office Wing',
           date: new Date().toISOString().split('T')[0],
           reason: 'Registration / Initial Allocation'
@@ -267,24 +315,16 @@ export default function App() {
     setEditingStudent(null);
   };
 
-  // User Approval / Role Change
-  const handleUpdateUserStatus = (id, newStatus, newRole = 'resident') => {
-    setStudents(prev => prev.map(s => {
-      if (s.id === id) {
-        return { ...s, status: newStatus, role: newRole };
-      }
-      return s;
-    }));
-  };
-
-  // Execute Room Transfer
+  // Execute Room Transfer (ADMIN ONLY)
   const handleExecuteTransfer = (e) => {
     e.preventDefault();
+    if (sessionUser?.role !== 'admin') return alert('Access Denied: Admin role required.');
+
     const student = students.find(s => s.id === transferData.studentId);
     if (!student) return;
 
     const historyRecord = {
-      oldRoom: student.room_no || student.roomNo || 'None',
+      oldRoom: student.room_no || 'None',
       oldBlock: student.block || 'None',
       roomNo: transferData.targetRoom,
       block: transferData.targetBlock,
@@ -295,7 +335,6 @@ export default function App() {
     const updatedStudent = {
       ...student,
       room_no: transferData.targetRoom,
-      roomNo: transferData.targetRoom,
       block: transferData.targetBlock,
       history: [historyRecord, ...(student.history || [])]
     };
@@ -305,37 +344,154 @@ export default function App() {
     if (selectedStudent?.id === student.id) setSelectedStudent(updatedStudent);
   };
 
-  // Create Maintenance Ticket
-  const handleCreateTicket = (e) => {
-    e.preventDefault();
-    const resident = currentSession.user;
-    const ticket = {
-      id: 'tkt_' + Date.now(),
-      studentId: resident.id,
-      studentName: resident.name,
-      roomNo: resident.roomNo || 'N/A',
-      block: resident.block || 'N/A',
-      category: newTicket.category,
-      title: newTicket.title,
-      description: newTicket.description,
-      priority: newTicket.priority,
-      status: 'Pending',
-      createdAt: new Date().toISOString().split('T')[0]
-    };
+  // --- UNAUTHENTICATED LOGIN SCREEN ---
+  if (!sessionUser) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4 font-sans">
+        <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-3xl p-8 space-y-6 shadow-2xl">
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 bg-indigo-600 text-white rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-600/30">
+              <Building2 className="w-7 h-7" />
+            </div>
+            <h1 className="text-2xl font-black tracking-tight mt-2">OBH HOSTEL PORTAL</h1>
+            <p className="text-xs text-slate-400">Sign in to access room status, directory, and maintenance.</p>
+          </div>
 
-    setComplaints(prev => [ticket, ...prev]);
-    setIsTicketModalOpen(false);
-    setNewTicket({ category: 'Electrical', title: '', description: '', priority: 'Medium' });
-  };
+          {authError && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs text-center font-medium">
+              {authError}
+            </div>
+          )}
 
-  // Active Resident Data
-  const currentResidentData = useMemo(() => {
-    if (currentSession.user.role === 'resident') {
-      return students.find(s => s.id === currentSession.user.id || s.email === currentSession.user.email);
-    }
-    return null;
-  }, [students, currentSession]);
+          {/* Google Sign-In Button */}
+          <button
+            onClick={handleGoogleSignIn}
+            className="w-full py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-2xl text-xs flex items-center justify-center space-x-2 shadow-md transition"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span>Continue with Google</span>
+          </button>
 
+          <div className="flex items-center my-4">
+            <div className="flex-1 border-t border-slate-800"></div>
+            <span className="px-3 text-[10px] text-slate-500 uppercase font-bold tracking-wider">or sign in with email</span>
+            <div className="flex-1 border-t border-slate-800"></div>
+          </div>
+
+          {/* Email / Password Form */}
+          <form onSubmit={handleEmailAuth} className="space-y-3 text-xs">
+            <div>
+              <label className="font-bold text-slate-400 block mb-1">Email Address</label>
+              <div className="relative">
+                <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                <input
+                  type="email"
+                  required
+                  placeholder="student@hostel.edu"
+                  value={loginEmail}
+                  onChange={e => setLoginEmail(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="font-bold text-slate-400 block mb-1">Password</label>
+              <div className="relative">
+                <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={loginPassword}
+                  onChange={e => setLoginPassword(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl shadow-lg transition"
+            >
+              {authLoading ? 'Signing In...' : (isSigningUp ? 'Create Account' : 'Sign In')}
+            </button>
+          </form>
+
+          <div className="flex justify-between items-center text-xs text-slate-500 pt-2 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsSigningUp(!isSigningUp)}
+              className="text-indigo-400 font-bold hover:underline"
+            >
+              {isSigningUp ? 'Already have an account? Sign In' : "Don't have an account? Register"}
+            </button>
+
+            <button
+              onClick={() => setIsConfigOpen(true)}
+              className="text-slate-400 hover:text-white flex items-center space-x-1"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>API Settings</span>
+            </button>
+          </div>
+        </div>
+
+        {/* API CONFIG MODAL FOR UNLEASHING SUPABASE */}
+        {isConfigOpen && (
+          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                <h3 className="font-bold text-base text-white">Setup Supabase Credentials</h3>
+                <button onClick={() => setIsConfigOpen(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="space-y-3 text-xs text-slate-300">
+                <div>
+                  <label className="font-bold block mb-1 text-slate-400">SUPABASE_URL</label>
+                  <input
+                    type="text"
+                    placeholder="https://xyz.supabase.co"
+                    value={config.supabaseUrl}
+                    onChange={e => setConfig({ ...config, supabaseUrl: e.target.value })}
+                    className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold block mb-1 text-slate-400">SUPABASE_ANON_KEY</label>
+                  <input
+                    type="password"
+                    placeholder="eyJhbG..."
+                    value={config.supabaseAnonKey}
+                    onChange={e => setConfig({ ...config, supabaseAnonKey: e.target.value })}
+                    className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-800 flex justify-end">
+                <button
+                  onClick={() => setIsConfigOpen(false)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs"
+                >
+                  Save Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // --- AUTHENTICATED MAIN DASHBOARD ---
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col md:flex-row font-sans transition-colors duration-200`}>
       
@@ -360,66 +516,23 @@ export default function App() {
             </button>
           </div>
 
-          <div className="p-3 m-3 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+          {/* ACTIVE LOGGED-IN USER INFO */}
+          <div className="p-3 m-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 space-y-1">
             <div className="flex justify-between items-center">
-              <span className="font-bold text-[10px] text-slate-400 uppercase tracking-wider">Backend Config</span>
-              <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${config.supabaseUrl ? 'bg-emerald-500/20 text-emerald-600' : 'bg-amber-500/20 text-amber-600'}`}>
-                {config.supabaseUrl ? 'Connected' : 'Setup Needed'}
+              <span className="font-bold text-[10px] text-slate-400 uppercase tracking-wider">Logged In As</span>
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-indigo-600 text-white">
+                {sessionUser.role}
               </span>
             </div>
-            <button
-              onClick={() => setIsConfigOpen(true)}
-              className="w-full py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg font-semibold flex items-center justify-center space-x-1.5 text-xs transition"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              <span>Configure API Keys</span>
-            </button>
+            <p className="font-bold text-xs truncate">{sessionUser.name}</p>
+            <p className="text-[10px] text-slate-400 truncate">{sessionUser.email}</p>
           </div>
 
-          <div className="p-3 m-3 rounded-xl bg-indigo-500/5 border border-indigo-500/20 space-y-2">
-            <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              <span>ACTIVE SESSION ROLE</span>
-              <span className="text-indigo-600 font-black">{currentSession.user.role}</span>
-            </div>
-            <select
-              value={currentSession.user.role + '_' + currentSession.user.status}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === 'admin') {
-                  setCurrentSession({
-                    isAuthenticated: true,
-                    user: { id: 'admin_1', name: 'Admin Warden', email: 'admin@hostel.edu', role: 'admin', status: 'approved' }
-                  });
-                } else if (val === 'authorized') {
-                  setCurrentSession({
-                    isAuthenticated: true,
-                    user: { id: 'auth_1', name: 'Assistant Caretaker', email: 'caretaker@hostel.edu', role: 'authorized', status: 'approved' }
-                  });
-                } else if (val === 'resident_approved') {
-                  setCurrentSession({
-                    isAuthenticated: true,
-                    user: { id: students[0]?.id || 'res_1', name: students[0]?.name || 'Sample Resident', email: 'resident@hostel.edu', role: 'resident', status: 'approved', roomNo: students[0]?.room_no || '1', block: students[0]?.block || 'Office Wing' }
-                  });
-                } else if (val === 'resident_pending') {
-                  setCurrentSession({
-                    isAuthenticated: true,
-                    user: { id: 'pending_1', name: 'New Student', email: 'newbie@hostel.edu', role: 'resident', status: 'pending' }
-                  });
-                }
-              }}
-              className={`w-full p-1.5 text-xs rounded-lg border font-medium ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-            >
-              <option value="admin">Admin / Warden View</option>
-              <option value="authorized">Authorized Staff View</option>
-              <option value="resident_approved">Verified Resident View</option>
-              <option value="resident_pending">Pending Approval View</option>
-            </select>
-          </div>
-
+          {/* NAVIGATION ITEMS */}
           <nav className="px-3 space-y-1">
-            {currentSession.user.status === 'approved' && (
+            {sessionUser.status === 'approved' && (
               <>
-                {(currentSession.user.role === 'admin' || currentSession.user.role === 'authorized') && (
+                {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
                   <button
                     onClick={() => setActiveTab('grid')}
                     className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'grid' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
@@ -429,7 +542,7 @@ export default function App() {
                   </button>
                 )}
 
-                {(currentSession.user.role === 'admin' || currentSession.user.role === 'authorized') && (
+                {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
                   <button
                     onClick={() => setActiveTab('directory')}
                     className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'directory' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
@@ -439,7 +552,7 @@ export default function App() {
                   </button>
                 )}
 
-                {currentSession.user.role === 'admin' && (
+                {sessionUser.role === 'admin' && (
                   <button
                     onClick={() => setActiveTab('approval')}
                     className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'approval' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
@@ -464,7 +577,7 @@ export default function App() {
                   <span>Maintenance Tickets</span>
                 </button>
 
-                {currentSession.user.role === 'admin' && (
+                {sessionUser.role === 'admin' && (
                   <button
                     onClick={() => setActiveTab('importer')}
                     className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'importer' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
@@ -486,22 +599,23 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 hidden md:flex items-center justify-between text-xs text-slate-500">
-          <span>OBH Portal v3.0</span>
-          <button 
-            onClick={() => setDarkMode(!darkMode)}
-            className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300"
+        {/* LOGOUT & SETTINGS FOOTER */}
+        <div className="p-4 border-t border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+          <button
+            onClick={handleLogout}
+            className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl font-bold flex items-center justify-center space-x-2 transition"
           >
-            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            <LogOut className="w-4 h-4" />
+            <span>Sign Out</span>
           </button>
         </div>
       </aside>
 
-      {/* MAIN CONTENT CONTAINER */}
+      {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto max-h-screen">
         
-        {/* STATS HEADER */}
-        {(currentSession.user.role === 'admin' || currentSession.user.role === 'authorized') && currentSession.user.status === 'approved' && (
+        {/* TOP STATS BAR (Admin & Staff Only) */}
+        {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
           <div className={`p-4 border-b ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
@@ -532,143 +646,77 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 1: PENDING USER SCREEN */}
-        {currentSession.user.status === 'pending' && (
+        {/* VIEW 1: PENDING ACCOUNT LOCK SCREEN */}
+        {sessionUser.status === 'pending' && (
           <div className="p-8 max-w-xl mx-auto my-12 text-center space-y-4">
             <div className="w-16 h-16 bg-amber-500/20 text-amber-600 rounded-full flex items-center justify-center mx-auto">
               <Clock className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-black">Registration Pending Admin Approval</h2>
+            <h2 className="text-2xl font-black">Account Pending Admin Approval</h2>
             <p className="text-sm text-slate-500 leading-relaxed">
-              Welcome, <strong className="text-slate-800 dark:text-slate-200">{currentSession.user.name}</strong>! Your account registration is currently pending authorization from the Hostel Warden or Caretaker.
+              Welcome, <strong className="text-slate-800 dark:text-slate-200">{sessionUser.name}</strong>! Your account registration has been created and is currently awaiting approval from the Hostel Admin.
             </p>
             <div className="p-4 rounded-xl bg-slate-100 dark:bg-slate-800/60 text-xs text-slate-500 text-left space-y-1 border border-slate-200 dark:border-slate-700">
-              <p className="font-bold text-slate-700 dark:text-slate-300 mb-1">Privacy Notice:</p>
-              <p>• You cannot view room assignments or student directories until authorized.</p>
-              <p>• Once approved, you will only see your individual profile, room history, and tickets.</p>
+              <p className="font-bold text-slate-700 dark:text-slate-300 mb-1">Privacy Protection Active:</p>
+              <p>• You cannot view other residents' data, room maps, or directories.</p>
+              <p>• Once an admin approves your account, your personal room allocation will unlock here.</p>
             </div>
           </div>
         )}
 
-        {/* VIEW 2: RESIDENT PROFILE VIEW */}
-        {currentSession.user.role === 'resident' && currentSession.user.status === 'approved' && (
+        {/* VIEW 2: RESIDENT ISOLATED DASHBOARD */}
+        {sessionUser.role === 'resident' && sessionUser.status === 'approved' && (
           <div className="p-6 max-w-4xl mx-auto space-y-6">
             <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
               <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider">Resident Personal Desk</span>
               <h2 className="text-2xl font-black">My Hostel Dashboard</h2>
             </div>
 
-            {currentResidentData ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-4 shadow-sm`}>
-                  <div className="text-center space-y-2">
-                    <img
-                      src={currentResidentData.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'}
-                      alt={currentResidentData.name}
-                      className="w-20 h-20 rounded-full mx-auto object-cover border-2 border-indigo-500 shadow"
-                    />
-                    <h3 className="font-bold text-lg">{currentResidentData.name}</h3>
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
-                      {currentResidentData.course} • Batch {currentResidentData.batch}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-4 shadow-sm`}>
+                <div className="text-center space-y-2">
+                  <img
+                    src={sessionUser.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'}
+                    alt={sessionUser.name}
+                    className="w-20 h-20 rounded-full mx-auto object-cover border-2 border-indigo-500 shadow"
+                  />
+                  <h3 className="font-bold text-lg">{sessionUser.name}</h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                    {sessionUser.course || 'MBBS'} • Batch {sessionUser.batch || '2023'}
+                  </span>
+                </div>
+
+                <div className="space-y-2 text-xs divide-y divide-slate-100 dark:divide-slate-800 pt-2">
+                  <div className="flex justify-between py-1.5">
+                    <span className="text-slate-400 font-medium">Room Allocation</span>
+                    <span className="font-bold text-indigo-600">{sessionUser.block}, Room {sessionUser.room_no}</span>
+                  </div>
+                  <div className="flex justify-between py-1.5">
+                    <span className="text-slate-400 font-medium">Fee Clearance</span>
+                    <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                      sessionUser.fee_status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                    }`}>
+                      {sessionUser.fee_status}
                     </span>
                   </div>
-
-                  <div className="space-y-2 text-xs divide-y divide-slate-100 dark:divide-slate-800 pt-2">
-                    <div className="flex justify-between py-1.5">
-                      <span className="text-slate-400 font-medium">Room Allocation</span>
-                      <span className="font-bold text-indigo-600">{currentResidentData.block}, Room {currentResidentData.room_no || currentResidentData.roomNo}</span>
-                    </div>
-                    <div className="flex justify-between py-1.5">
-                      <span className="text-slate-400 font-medium">Roll Number</span>
-                      <span className="font-mono">{currentResidentData.roll_no || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between py-1.5">
-                      <span className="text-slate-400 font-medium">Phone</span>
-                      <span className="font-semibold">{currentResidentData.phone || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between py-1.5">
-                      <span className="text-slate-400 font-medium">Father's Name</span>
-                      <span className="font-semibold">{currentResidentData.father_name || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between py-1.5">
-                      <span className="text-slate-400 font-medium">Fee Clearance</span>
-                      <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                        (currentResidentData.fee_status || currentResidentData.feeStatus) === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
-                      }`}>
-                        {currentResidentData.fee_status || currentResidentData.feeStatus}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="md:col-span-2 space-y-6">
-                  <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-3 shadow-sm`}>
-                    <h4 className="font-bold text-sm text-slate-500 uppercase tracking-wider flex items-center space-x-2">
-                      <Clock className="w-4 h-4 text-indigo-500" />
-                      <span>My Room Transfer History</span>
-                    </h4>
-                    
-                    <div className="space-y-2 border-l-2 border-indigo-500/30 pl-3 ml-2">
-                      {currentResidentData.history && currentResidentData.history.length > 0 ? (
-                        currentResidentData.history.map((h, i) => (
-                          <div key={i} className="text-xs space-y-0.5 relative">
-                            <div className="w-2 h-2 rounded-full bg-indigo-500 absolute -left-[17px] top-1"></div>
-                            <p className="font-bold text-slate-800 dark:text-slate-200">{h.block}, Room {h.roomNo || h.room_no}</p>
-                            <p className="text-slate-400 text-[11px]">{h.date} • {h.reason}</p>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-xs text-slate-400 italic">No room transfers on record.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-3 shadow-sm`}>
-                    <div className="flex justify-between items-center">
-                      <h4 className="font-bold text-sm text-slate-500 uppercase tracking-wider flex items-center space-x-2">
-                        <Wrench className="w-4 h-4 text-indigo-500" />
-                        <span>My Maintenance Tickets</span>
-                      </h4>
-                      <button
-                        onClick={() => setIsTicketModalOpen(true)}
-                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow"
-                      >
-                        + File Issue
-                      </button>
-                    </div>
-
-                    <div className="space-y-2">
-                      {complaints.filter(c => c.studentId === currentResidentData.id).length > 0 ? (
-                        complaints.filter(c => c.studentId === currentResidentData.id).map(ticket => (
-                          <div key={ticket.id} className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between items-start text-xs">
-                            <div>
-                              <span className="font-bold">{ticket.title}</span>
-                              <p className="text-slate-400 mt-0.5">{ticket.description}</p>
-                            </div>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                              ticket.status === 'Resolved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                            }`}>
-                              {ticket.status}
-                            </span>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-xs text-slate-400 italic">No active maintenance tickets filed.</p>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="p-8 text-center text-slate-400 border border-dashed rounded-2xl">
-                No resident record found for your logged-in profile. Please ask the hostel admin to register your details.
+
+              <div className="md:col-span-2 space-y-6">
+                <div className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-3 shadow-sm`}>
+                  <h4 className="font-bold text-sm text-slate-500 uppercase tracking-wider flex items-center space-x-2">
+                    <Clock className="w-4 h-4 text-indigo-500" />
+                    <span>My Room Movement History</span>
+                  </h4>
+                  <p className="text-xs text-slate-400 italic">No room transfers recorded for your profile.</p>
+                </div>
               </div>
-            )}
+            </div>
           </div>
         )}
 
         {/* VIEW 3: ADMIN ROOM GRID */}
-        {activeTab === 'grid' && (currentSession.user.role === 'admin' || currentSession.user.role === 'authorized') && currentSession.user.status === 'approved' && (
+        {activeTab === 'grid' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
           <div className="p-6 space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
@@ -687,7 +735,7 @@ export default function App() {
                     className={`pl-8 pr-3 py-1.5 text-xs rounded-lg border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-300'}`}
                   />
                 </div>
-                {currentSession.user.role === 'admin' && (
+                {sessionUser.role === 'admin' && (
                   <button
                     onClick={() => {
                       setEditingStudent({ name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Wing', room_no: '1', phone: '', father_name: '', address: '', fee_status: 'Paid', fee_amount: 45000, paid_amount: 45000, photo_url: '' });
@@ -738,7 +786,7 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="p-6 text-center text-xs text-slate-400 italic">
-                      No residents currently assigned to this block in the database.
+                      No residents assigned to this block yet.
                     </div>
                   )}
                 </div>
@@ -747,16 +795,16 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 4: MASTER RESIDENT DIRECTORY */}
-        {activeTab === 'directory' && (currentSession.user.role === 'admin' || currentSession.user.role === 'authorized') && currentSession.user.status === 'approved' && (
+        {/* VIEW 4: MASTER DIRECTORY */}
+        {activeTab === 'directory' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && sessionUser.status === 'approved' && (
           <div className="p-6 space-y-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h2 className="text-xl font-bold tracking-tight">Master Resident Directory</h2>
-                <p className="text-xs text-slate-500">Authorized personnel view for resident profiles, room assignments, and fees.</p>
+                <p className="text-xs text-slate-500">Authorized view for resident profiles, room assignments, and fees.</p>
               </div>
 
-              {currentSession.user.role === 'admin' && (
+              {sessionUser.role === 'admin' && (
                 <button
                   onClick={() => {
                     setEditingStudent({ name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Wing', room_no: '1', phone: '', father_name: '', address: '', fee_status: 'Paid', fee_amount: 45000, paid_amount: 45000, photo_url: '' });
@@ -813,7 +861,7 @@ export default function App() {
                           <button onClick={() => setSelectedStudent(std)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
                             <Eye className="w-3.5 h-3.5 text-slate-600" />
                           </button>
-                          {currentSession.user.role === 'admin' && (
+                          {sessionUser.role === 'admin' && (
                             <button onClick={() => { setEditingStudent(std); setIsEditStudentModalOpen(true); }} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
                               <Edit className="w-3.5 h-3.5 text-indigo-600" />
                             </button>
@@ -824,7 +872,7 @@ export default function App() {
                   ) : (
                     <tr>
                       <td colSpan="6" className="p-8 text-center text-slate-400 italic">
-                        No registered resident records found in database.
+                        No resident records found.
                       </td>
                     </tr>
                   )}
@@ -834,12 +882,12 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 5: USER REGISTRATION APPROVAL DESK */}
-        {activeTab === 'approval' && currentSession.user.role === 'admin' && (
+        {/* VIEW 5: USER APPROVAL DESK */}
+        {activeTab === 'approval' && sessionUser.role === 'admin' && (
           <div className="p-6 space-y-4 max-w-4xl mx-auto">
             <div>
               <h2 className="text-xl font-bold tracking-tight">Pending User Registrations</h2>
-              <p className="text-xs text-slate-500">Approve or reject newly registered accounts before granting access to resident data.</p>
+              <p className="text-xs text-slate-500">Approve accounts and assign roles before users can view resident details.</p>
             </div>
 
             <div className="space-y-3">
@@ -851,34 +899,32 @@ export default function App() {
                         <span className="font-bold text-sm">{user.name}</span>
                         <span className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold uppercase">Pending</span>
                       </div>
-                      <p className="text-xs text-slate-400">{user.email} • Batch {user.batch || 'N/A'} ({user.course || 'MBBS'})</p>
+                      <p className="text-xs text-slate-400">{user.email}</p>
                     </div>
 
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => handleUpdateUserStatus(user.id, 'approved', 'resident')}
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow"
+                        onClick={() => {
+                          setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'resident' } : s));
+                        }}
+                        className="px-3 py-1 bg-emerald-600 text-white font-bold text-xs rounded-lg shadow"
                       >
                         Approve Resident
                       </button>
                       <button
-                        onClick={() => handleUpdateUserStatus(user.id, 'approved', 'authorized')}
-                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow"
+                        onClick={() => {
+                          setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'authorized' } : s));
+                        }}
+                        className="px-3 py-1 bg-indigo-600 text-white font-bold text-xs rounded-lg shadow"
                       >
                         Make Staff
-                      </button>
-                      <button
-                        onClick={() => handleUpdateUserStatus(user.id, 'rejected')}
-                        className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow"
-                      >
-                        Reject
                       </button>
                     </div>
                   </div>
                 ))
               ) : (
                 <div className="p-8 text-center text-xs text-slate-400 border border-dashed rounded-2xl">
-                  No pending user registration requests at this time.
+                  No pending registration requests.
                 </div>
               )}
             </div>
@@ -891,11 +937,11 @@ export default function App() {
             <div className="flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold tracking-tight">Hostel Maintenance Tickets</h2>
-                <p className="text-xs text-slate-500">Track and update room repair requests across all blocks.</p>
+                <p className="text-xs text-slate-500">File and track room repair requests.</p>
               </div>
               <button
                 onClick={() => setIsTicketModalOpen(true)}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow"
+                className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold text-xs shadow"
               >
                 + File New Ticket
               </button>
@@ -917,71 +963,30 @@ export default function App() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">{tkt.description}</p>
-                    <div className="flex justify-between items-center text-[11px] text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-                      <span>{tkt.studentName} ({tkt.block}, Rm {tkt.roomNo})</span>
-                      <span>{tkt.createdAt}</span>
-                    </div>
-
-                    {currentSession.user.role === 'admin' && (
-                      <div className="pt-2 flex justify-end space-x-1">
-                        <select
-                          value={tkt.status}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setComplaints(prev => prev.map(c => c.id === tkt.id ? { ...c, status: val } : c));
-                          }}
-                          className={`text-xs p-1 rounded border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-300'}`}
-                        >
-                          <option value="Pending">Pending</option>
-                          <option value="In Progress">In Progress</option>
-                          <option value="Resolved">Resolved</option>
-                        </select>
-                      </div>
-                    )}
                   </div>
                 ))
               ) : (
                 <div className="col-span-2 p-8 text-center text-xs text-slate-400 border border-dashed rounded-2xl">
-                  No maintenance tickets recorded.
+                  No maintenance tickets filed yet.
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* VIEW 7: GEMINI GOOGLE SHEET IMPORTER */}
-        {activeTab === 'importer' && currentSession.user.role === 'admin' && (
+        {/* VIEW 7: GEMINI GOOGLE SHEET IMPORTER (ADMIN ONLY) */}
+        {activeTab === 'importer' && sessionUser.role === 'admin' && (
           <div className="p-6 max-w-4xl mx-auto space-y-5">
             <div>
               <div className="flex items-center space-x-2 text-amber-500 mb-1">
                 <Sparkles className="w-4 h-4" />
-                <span className="font-bold text-xs uppercase tracking-wider">Gemini AI Helper</span>
+                <span className="font-bold text-xs uppercase tracking-wider">Gemini AI Importer</span>
               </div>
               <h2 className="text-xl font-bold">Bulk Google Sheet Importer</h2>
-              <p className="text-xs text-slate-500 mt-1">Convert raw Google Sheet rows into database-ready JSON records.</p>
-            </div>
-
-            <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-3`}>
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-slate-500 uppercase">Gemini Prompt Template</span>
-                <button
-                  onClick={() => {
-                    const text = `Convert my hostel room spreadsheet data into a valid JSON array of objects with keys: "name", "course", "batch", "block", "room_no", "phone", "father_name", "address", "fee_status". Here is my sheet data: [PASTE SHEET ROWS HERE]`;
-                    navigator.clipboard.writeText(text);
-                    alert('Prompt copied!');
-                  }}
-                  className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded"
-                >
-                  Copy Prompt
-                </button>
-              </div>
-              <pre className="p-3 rounded-lg bg-slate-100 dark:bg-slate-900 text-xs font-mono text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
-                {`Convert my hostel room spreadsheet data into a valid JSON array of objects with keys: "name", "course", "batch", "block", "room_no", "phone", "father_name", "address", "fee_status".`}
-              </pre>
+              <p className="text-xs text-slate-500 mt-1">Paste JSON generated from Gemini to bulk upload residents.</p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-500 uppercase block">Paste JSON Payload from Gemini:</label>
               <textarea
                 id="jsonBulkArea"
                 rows={8}
@@ -994,7 +999,6 @@ export default function App() {
     "room_no": "4",
     "phone": "+91 98765 00000",
     "father_name": "Rajendra Singh",
-    "address": "Delhi",
     "fee_status": "Paid"
   }
 ]`}
@@ -1017,11 +1021,9 @@ export default function App() {
                         room_no: String(item.room_no || '1'),
                         phone: item.phone || '',
                         father_name: item.father_name || '',
-                        address: item.address || '',
                         fee_status: item.fee_status || 'Paid',
                         status: 'approved',
-                        role: 'resident',
-                        history: [{ roomNo: String(item.room_no || '1'), block: item.block || 'Office Wing', date: new Date().toISOString().split('T')[0], reason: 'Bulk Sheet Import' }]
+                        role: 'resident'
                       }));
 
                       setStudents(prev => [...prev, ...formatted]);
@@ -1042,23 +1044,23 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 8: SUPABASE SQL SETUP GUIDE */}
+        {/* VIEW 8: SUPABASE SQL GUIDE */}
         {activeTab === 'sql' && (
           <div className="p-6 max-w-4xl mx-auto space-y-4">
             <div className="flex justify-between items-center">
               <div>
-                <h2 className="text-xl font-bold tracking-tight">Supabase PostgreSQL Schema & RLS Setup</h2>
-                <p className="text-xs text-slate-500">Copy and run these SQL queries in your Supabase SQL Editor for production RLS security.</p>
+                <h2 className="text-xl font-bold tracking-tight">Supabase PostgreSQL Schema Setup</h2>
+                <p className="text-xs text-slate-500">Run this query in your Supabase SQL Editor.</p>
               </div>
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-                  alert('SQL Schema & Policies copied to clipboard!');
+                  alert('SQL Schema copied to clipboard!');
                 }}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
               >
                 <Copy className="w-3.5 h-3.5" />
-                <span>Copy SQL Script</span>
+                <span>Copy SQL</span>
               </button>
             </div>
 
@@ -1070,84 +1072,13 @@ export default function App() {
 
       </main>
 
-      {/* CONFIGURATION MODAL */}
-      {isConfigOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
-            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
-              <h3 className="font-bold text-base">Backend & Auth Configuration</h3>
-              <button onClick={() => setIsConfigOpen(false)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold block mb-1">SUPABASE_URL</label>
-                <input
-                  type="text"
-                  placeholder="https://xyz.supabase.co"
-                  value={config.supabaseUrl}
-                  onChange={e => setConfig({ ...config, supabaseUrl: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">SUPABASE_ANON_KEY</label>
-                <input
-                  type="password"
-                  placeholder="eyJhbG..."
-                  value={config.supabaseAnonKey}
-                  onChange={e => setConfig({ ...config, supabaseAnonKey: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">GOOGLE_CLIENT_ID</label>
-                <input
-                  type="text"
-                  placeholder="123456...apps.googleusercontent.com"
-                  value={config.googleClientId}
-                  onChange={e => setConfig({ ...config, googleClientId: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">GOOGLE_APPS_SCRIPT_URL (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="https://script.google.com/macros/s/..."
-                  value={config.googleAppsScriptUrl}
-                  onChange={e => setConfig({ ...config, googleAppsScriptUrl: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end">
-              <button
-                onClick={() => setIsConfigOpen(false)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow"
-              >
-                Save Settings
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD/EDIT RESIDENT MODAL */}
-      {isEditStudentModalOpen && editingStudent && (
+      {/* ADD/EDIT RESIDENT MODAL (ADMIN ONLY) */}
+      {isEditStudentModalOpen && editingStudent && sessionUser.role === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={handleSaveStudent} className={`w-full max-w-lg rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
-              <h3 className="font-bold text-base">{editingStudent.id ? 'Edit Resident Details' : 'Register New Resident'}</h3>
-              <button type="button" onClick={() => setIsEditStudentModalOpen(false)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
-                <X className="w-5 h-5" />
-              </button>
+              <h3 className="font-bold text-base">{editingStudent.id ? 'Edit Resident' : 'Register New Resident'}</h3>
+              <button type="button" onClick={() => setIsEditStudentModalOpen(false)}><X className="w-5 h-5" /></button>
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-xs">
@@ -1163,41 +1094,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="font-bold block mb-1">Roll Number</label>
-                <input
-                  type="text"
-                  value={editingStudent.roll_no || ''}
-                  onChange={e => setEditingStudent({ ...editingStudent, roll_no: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">Course</label>
-                <select
-                  value={editingStudent.course || 'MBBS'}
-                  onChange={e => setEditingStudent({ ...editingStudent, course: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                >
-                  <option value="MBBS">MBBS</option>
-                  <option value="BDS">BDS</option>
-                  <option value="MD/MS">MD/MS</option>
-                  <option value="Intern">Intern</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">Batch Year</label>
-                <input
-                  type="text"
-                  value={editingStudent.batch || ''}
-                  onChange={e => setEditingStudent({ ...editingStudent, batch: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">Hostel Block</label>
+                <label className="font-bold block mb-1">Block</label>
                 <select
                   value={editingStudent.block || 'Office Wing'}
                   onChange={e => setEditingStudent({ ...editingStudent, block: e.target.value })}
@@ -1211,53 +1108,21 @@ export default function App() {
                 <label className="font-bold block mb-1">Room Number</label>
                 <input
                   type="text"
-                  value={editingStudent.room_no || editingStudent.roomNo || ''}
-                  onChange={e => setEditingStudent({ ...editingStudent, room_no: e.target.value, roomNo: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-
-              <div>
-                <label className="font-bold block mb-1">Phone Number</label>
-                <input
-                  type="text"
-                  value={editingStudent.phone || ''}
-                  onChange={e => setEditingStudent({ ...editingStudent, phone: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
-
-              <div className="col-span-2">
-                <label className="font-bold block mb-1">Father's Name</label>
-                <input
-                  type="text"
-                  value={editingStudent.father_name || ''}
-                  onChange={e => setEditingStudent({ ...editingStudent, father_name: e.target.value })}
+                  value={editingStudent.room_no || ''}
+                  onChange={e => setEditingStudent({ ...editingStudent, room_no: e.target.value })}
                   className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                 />
               </div>
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button
-                type="button"
-                onClick={() => setIsEditStudentModalOpen(false)}
-                className="px-4 py-2 bg-slate-200 dark:bg-slate-800 font-semibold rounded-xl text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow"
-              >
-                Save Record
-              </button>
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">Save Record</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* INSPECTOR & TRANSFER MODAL */}
+      {/* RESIDENT INSPECTOR MODAL */}
       {selectedStudent && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
@@ -1269,9 +1134,7 @@ export default function App() {
                   <p className="text-xs text-slate-400">{selectedStudent.course} • Batch {selectedStudent.batch}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedStudent(null)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
-                <X className="w-5 h-5" />
-              </button>
+              <button onClick={() => setSelectedStudent(null)}><X className="w-5 h-5" /></button>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1285,23 +1148,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="space-y-2 pt-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Room Movement History</h4>
-              <div className="space-y-1 text-xs border-l-2 border-indigo-500/30 pl-3">
-                {selectedStudent.history && selectedStudent.history.length > 0 ? (
-                  selectedStudent.history.map((h, i) => (
-                    <div key={i} className="text-xs">
-                      <span className="font-bold">{h.block}, Room {h.roomNo || h.room_no}</span>
-                      <span className="text-slate-400 block text-[10px]">{h.date} • {h.reason}</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-slate-400 italic">No transfer records found.</p>
-                )}
-              </div>
-            </div>
-
-            {currentSession.user.role === 'admin' && (
+            {sessionUser.role === 'admin' && (
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between">
                 <button
                   onClick={() => {
@@ -1312,27 +1159,20 @@ export default function App() {
                 >
                   Transfer Room
                 </button>
-                <button
-                  onClick={() => setSelectedStudent(null)}
-                  className="px-4 py-1.5 bg-slate-200 dark:bg-slate-800 font-semibold rounded-lg text-xs"
-                >
-                  Close
-                </button>
+                <button onClick={() => setSelectedStudent(null)} className="px-4 py-1.5 bg-slate-200 dark:bg-slate-800 font-semibold rounded-lg text-xs">Close</button>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TRANSFER ROOM MODAL */}
-      {isTransferModalOpen && (
+      {/* TRANSFER ROOM MODAL (ADMIN ONLY) */}
+      {isTransferModalOpen && sessionUser.role === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={handleExecuteTransfer} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
               <h3 className="font-bold text-base">Re-assign Room & Log History</h3>
-              <button type="button" onClick={() => setIsTransferModalOpen(false)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
-                <X className="w-5 h-5" />
-              </button>
+              <button type="button" onClick={() => setIsTransferModalOpen(false)}><X className="w-5 h-5" /></button>
             </div>
 
             <div className="space-y-3 text-xs">
@@ -1357,34 +1197,10 @@ export default function App() {
                   className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                 />
               </div>
-
-              <div>
-                <label className="font-bold block mb-1">Reason for Transfer</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Health request, Mutual Swap"
-                  value={transferData.reason}
-                  onChange={e => setTransferData({ ...transferData, reason: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                />
-              </div>
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button
-                type="button"
-                onClick={() => setIsTransferModalOpen(false)}
-                className="px-4 py-2 bg-slate-200 dark:bg-slate-800 font-semibold rounded-xl text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow"
-              >
-                Confirm Transfer
-              </button>
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">Confirm Transfer</button>
             </div>
           </form>
         </div>
@@ -1393,35 +1209,33 @@ export default function App() {
       {/* CREATE TICKET MODAL */}
       {isTicketModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleCreateTicket} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const ticket = {
+              id: 'tkt_' + Date.now(),
+              studentId: sessionUser.id,
+              studentName: sessionUser.name,
+              roomNo: sessionUser.room_no || 'N/A',
+              block: sessionUser.block || 'N/A',
+              category: newTicket.category,
+              title: newTicket.title,
+              description: newTicket.description,
+              status: 'Pending'
+            };
+            setComplaints(prev => [ticket, ...prev]);
+            setIsTicketModalOpen(false);
+          }} className={`w-full max-w-md rounded-2xl ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white'} border p-6 space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
               <h3 className="font-bold text-base">File Maintenance Ticket</h3>
-              <button type="button" onClick={() => setIsTicketModalOpen(false)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
-                <X className="w-5 h-5" />
-              </button>
+              <button type="button" onClick={() => setIsTicketModalOpen(false)}><X className="w-5 h-5" /></button>
             </div>
 
             <div className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold block mb-1">Category</label>
-                <select
-                  value={newTicket.category}
-                  onChange={e => setNewTicket({ ...newTicket, category: e.target.value })}
-                  className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
-                >
-                  <option value="Electrical">Electrical</option>
-                  <option value="Plumbing">Plumbing</option>
-                  <option value="Furniture">Furniture</option>
-                  <option value="Cleanliness">Cleanliness</option>
-                </select>
-              </div>
-
               <div>
                 <label className="font-bold block mb-1">Title</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Tap leaking"
                   value={newTicket.title}
                   onChange={e => setNewTicket({ ...newTicket, title: e.target.value })}
                   className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
@@ -1433,7 +1247,6 @@ export default function App() {
                 <textarea
                   rows={3}
                   required
-                  placeholder="Details of the problem..."
                   value={newTicket.description}
                   onChange={e => setNewTicket({ ...newTicket, description: e.target.value })}
                   className={`w-full p-2 rounded-lg border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
@@ -1442,19 +1255,7 @@ export default function App() {
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button
-                type="button"
-                onClick={() => setIsTicketModalOpen(false)}
-                className="px-4 py-2 bg-slate-200 dark:bg-slate-800 font-semibold rounded-xl text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow"
-              >
-                Submit Ticket
-              </button>
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">Submit Ticket</button>
             </div>
           </form>
         </div>
