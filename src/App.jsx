@@ -15,7 +15,7 @@ const DEFAULT_CONFIG = {
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvamF1dnF2cnFhcnh0d3lybXRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4NjczMDcsImV4cCI6MjEwODQ0MzMwN30.X9nNRtP2Q2AteCZXRYWPmADReq7Y5u9rxq5UortTtXA',
 };
 
-const HOSTEL_BLOCKS = ['Office Wing', 'Mathura (North)', 'Mathura (South)', 'Tennis Block'];
+const HOSTEL_BLOCKS = ['NCC Block','Office Block', 'Mathura (North)', 'Mathura (South)', 'Tennis Block', 'PG Block'];
 const ADMIN_EMAILS = ['dr.ankitraj8558@gmail.com', 'ankit.raj@hostel.edu'];
 
 export default function App() {
