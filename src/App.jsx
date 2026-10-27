@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { 
   Building2, Users, Search, Plus, UserCheck, 
@@ -6,7 +6,7 @@ import {
   Moon, Sun, Sparkles, X, Eye, 
   Upload, Database, Copy, Settings, LogOut, Lock, Mail,
   Map, Image as ImageIcon, Trash2, Calendar, CreditCard, Phone, User, FileText, CheckCircle, AlertCircle,
-  Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight
+  Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson
 } from 'lucide-react';
 
 // --- DEFAULT CONFIGURATION ---
@@ -15,7 +15,7 @@ const DEFAULT_CONFIG = {
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvamF1dnF2cnFhcnh0d3lybXRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4NjczMDcsImV4cCI6MjEwODQ0MzMwN30.X9nNRtP2Q2AteCZXRYWPmADReq7Y5u9rxq5UortTtXA',
 };
 
-const HOSTEL_BLOCKS = ['NCC Block','Office Block', 'Mathura (North)', 'Mathura (South)', 'Tennis Block', 'PG Block'];
+const HOSTEL_BLOCKS = ['NCC Block', 'Office Block', 'Mathura (North)', 'Mathura (South)', 'Tennis Block', 'PG Block'];
 const ADMIN_EMAILS = ['dr.ankitraj8558@gmail.com', 'ankit.raj@hostel.edu'];
 
 export default function App() {
@@ -38,6 +38,9 @@ export default function App() {
     return null;
   }, [config.supabaseUrl, config.supabaseAnonKey]);
 
+  // Hidden File Input Ref for JSON Upload
+  const fileInputRef = useRef(null);
+
   // Auth State
   const [sessionUser, setSessionUser] = useState(null);
   const [loginEmail, setLoginEmail] = useState('');
@@ -50,7 +53,7 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
 
-  // CLEAN DATA STORES (No Hardcoded / Fake Records)
+  // CLEAN DATA STORES
   const [students, setStudents] = useState(() => {
     const saved = localStorage.getItem('obh_db_students_v3');
     return saved ? JSON.parse(saved) : [];
@@ -82,7 +85,7 @@ export default function App() {
 
   // Room Configuration Modal State
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
-  const [newRoomData, setNewRoomData] = useState({ block: 'Office Wing', room_no: '', seater: '1' });
+  const [newRoomData, setNewRoomData] = useState({ block: 'Office Block', room_no: '', seater: '1' });
 
   // Map Modal State
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
@@ -91,7 +94,7 @@ export default function App() {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [transferData, setTransferData] = useState({ 
     studentId: '', 
-    targetBlock: 'Office Wing', 
+    targetBlock: 'Office Block', 
     targetRoom: '', 
     transferDate: new Date().toISOString().split('T')[0],
     academicYear: '2026-27',
@@ -164,7 +167,7 @@ export default function App() {
           course: 'MBBS',
           batch: '2023',
           roll_no: '',
-          block: 'Office Wing',
+          block: 'Office Block',
           room_no: 'Unassigned',
           phone: '',
           father_name: '',
@@ -210,7 +213,7 @@ export default function App() {
             course: 'MBBS',
             batch: '2023',
             roll_no: '',
-            block: 'Office Wing',
+            block: 'Office Block',
             room_no: 'Unassigned',
             phone: '',
             father_name: '',
@@ -258,11 +261,149 @@ export default function App() {
     setSessionUser(null);
   };
 
+  // --- JSON FILE IMPORT HANDLER ---
+  const handleImportJSON = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const rawData = JSON.parse(event.target.result);
+        if (!Array.isArray(rawData)) {
+          alert("Invalid JSON: Expected an array of student/room records.");
+          return;
+        }
+
+        const importedStudents = [];
+        const importedRoomsMap = new Map();
+        let currentBlock = 'Office Block';
+
+        rawData.forEach((item, idx) => {
+          // Identify block if specified or forward fill
+          let blockVal = item.Block || item.block || item.BLOCK || currentBlock;
+          if (blockVal) currentBlock = blockVal;
+
+          let matchedBlock = HOSTEL_BLOCKS.find(b => b.toLowerCase().includes(currentBlock.toLowerCase())) || currentBlock;
+          const roomNoVal = String(item['Room No'] || item['Room No.'] || item.room_no || item.roomNo || '').trim();
+          const batchVal = String(item.BATCH || item.Batch || item.batch || '2023').trim();
+
+          // Extract occupants from JSON keys (handles both extracted PDF table format and direct objects)
+          const occupants = [];
+          Object.keys(item).forEach(key => {
+            if (key.toLowerCase().includes('occupant')) {
+              const val = String(item[key] || '').trim();
+              if (val && !['GUEST ROOM', 'TV ROOM', 'OFFICE', 'STORE ROOM'].includes(val.toUpperCase())) {
+                const names = val.split('\n').map(n => n.trim()).filter(n => n.length > 0);
+                occupants.push(...names);
+              }
+            }
+          });
+
+          // Direct student object format fallback
+          if (occupants.length === 0 && (item.name || item.Name || item.student_name)) {
+            occupants.push(item.name || item.Name || item.student_name);
+          }
+
+          if (roomNoVal && occupants.length > 0) {
+            const roomKey = `${matchedBlock}_${roomNoVal}`;
+            const existingSeater = importedRoomsMap.get(roomKey)?.seater || 1;
+            const seaterCount = String(Math.max(parseInt(existingSeater, 10), occupants.length, 1));
+
+            importedRoomsMap.set(roomKey, {
+              id: `rm_${roomKey}`,
+              block: matchedBlock,
+              room_no: roomNoVal,
+              seater: seaterCount,
+              notes: ''
+            });
+
+            occupants.forEach((rawName) => {
+              let course = 'MBBS';
+              let cleanName = rawName;
+              if (rawName.includes('(BDS)')) {
+                course = 'BDS';
+                cleanName = rawName.replace('(BDS)', '').trim();
+              } else if (rawName.includes('(MD/MS)')) {
+                course = 'MD/MS';
+                cleanName = rawName.replace('(MD/MS)', '').trim();
+              }
+
+              importedStudents.push({
+                id: item.id || `std_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                name: cleanName,
+                email: item.email || `${cleanName.toLowerCase().replace(/\s+/g, '.')}@hostel.edu`,
+                roll_no: item.roll_no || item.rollNo || '',
+                course: item.course || course,
+                batch: item.batch || batchVal,
+                block: matchedBlock,
+                room_no: roomNoVal,
+                phone: item.phone || '',
+                father_name: item.father_name || item.fatherName || '',
+                address: item.address || '',
+                joining_date: item.joining_date || new Date().toISOString().split('T')[0],
+                fee_status: item.fee_status || 'Paid',
+                status: item.status || 'approved',
+                role: item.role || 'resident',
+                fee_ledger: item.fee_ledger || [
+                  {
+                    year: '2026-27',
+                    block: matchedBlock,
+                    room_no: roomNoVal,
+                    amount: 45000,
+                    paid: 45000,
+                    status: 'Paid',
+                    date: new Date().toISOString().split('T')[0]
+                  }
+                ],
+                history: item.history || [
+                  {
+                    oldRoom: 'None',
+                    oldBlock: 'None',
+                    newRoom: roomNoVal,
+                    newBlock: matchedBlock,
+                    date: new Date().toISOString().split('T')[0],
+                    reason: 'Imported from Room Register JSON'
+                  }
+                ]
+              });
+            });
+          }
+        });
+
+        if (importedStudents.length === 0) {
+          alert("No valid student records could be extracted from this JSON file.");
+          return;
+        }
+
+        // Merge into current state
+        setStudents(prev => {
+          const existingMap = new Map(prev.map(s => [`${s.name}_${s.block}_${s.room_no}`, s]));
+          importedStudents.forEach(s => existingMap.set(`${s.name}_${s.block}_${s.room_no}`, s));
+          return Array.from(existingMap.values());
+        });
+
+        setRooms(prev => {
+          const roomMap = new Map(prev.map(r => [`${r.block}_${r.room_no}`, r]));
+          importedRoomsMap.forEach((r, k) => roomMap.set(k, r));
+          return Array.from(roomMap.values());
+        });
+
+        alert(`Successfully imported ${importedStudents.length} residents and configured ${importedRoomsMap.size} rooms!`);
+      } catch (err) {
+        console.error("JSON Read Error:", err);
+        alert("Error parsing JSON file. Please check file format.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Reset input
+  };
+
   // Derived Approved / Pending lists
   const approvedStudents = useMemo(() => students.filter(s => s.status === 'approved'), [students]);
   const pendingStudents = useMemo(() => students.filter(s => s.status === 'pending'), [students]);
 
-  // Occupancy Analysis based strictly on admin-created rooms
+  // Occupancy Analysis based strictly on configured rooms
   const occupancyStats = useMemo(() => {
     let totalBedsCapacity = 0;
     let totalOccupiedBeds = 0;
@@ -338,7 +479,7 @@ export default function App() {
 
     setRooms(prev => [...prev, createdRoom]);
     setIsAddRoomModalOpen(false);
-    setNewRoomData({ block: 'Office Wing', room_no: '', seater: '1' });
+    setNewRoomData({ block: 'Office Block', room_no: '', seater: '1' });
   };
 
   // Delete Room (Admin Only)
@@ -412,7 +553,7 @@ export default function App() {
           oldRoom: 'None',
           oldBlock: 'None',
           newRoom: editingStudent.room_no || 'Unassigned',
-          newBlock: editingStudent.block || 'Office Wing',
+          newBlock: editingStudent.block || 'Office Block',
           date: editingStudent.joining_date || new Date().toISOString().split('T')[0],
           reason: 'Initial Registration'
         }]
@@ -616,6 +757,15 @@ export default function App() {
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col md:flex-row font-sans transition-colors duration-200`}>
       
+      {/* Hidden File Input for Import */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        accept=".json" 
+        onChange={handleImportJSON} 
+        className="hidden" 
+      />
+
       {/* SIDEBAR NAVIGATION */}
       <aside className={`w-full md:w-64 ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} border-r border-b md:border-b-0 flex-shrink-0 flex flex-col justify-between`}>
         <div>
@@ -717,7 +867,17 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 text-xs">
+        <div className="p-4 border-t border-slate-200 dark:border-slate-800 text-xs space-y-2">
+          {sessionUser.role === 'admin' && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center space-x-2 transition shadow"
+            >
+              <FileJson className="w-4 h-4" />
+              <span>Import JSON File</span>
+            </button>
+          )}
+
           <button
             onClick={handleLogout}
             className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl font-bold flex items-center justify-center space-x-2 transition"
@@ -843,6 +1003,13 @@ export default function App() {
               {sessionUser.role === 'admin' && (
                 <div className="flex items-center space-x-2">
                   <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                  >
+                    <FileJson className="w-3.5 h-3.5" />
+                    <span>Import JSON</span>
+                  </button>
+                  <button
                     onClick={() => setIsAddRoomModalOpen(true)}
                     className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
                   >
@@ -852,7 +1019,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       setEditingStudent({ 
-                        name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Wing', room_no: '', 
+                        name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Block', room_no: '', 
                         phone: '', father_name: '', address: '', joining_date: new Date().toISOString().split('T')[0], fee_status: 'Paid' 
                       });
                       setIsEditStudentModalOpen(true);
@@ -953,7 +1120,7 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="p-6 text-center text-xs text-slate-400 italic">
-                      No rooms configured in {blockName}. Click "+ Add Room" above to add rooms.
+                      No rooms configured in {blockName}. Click "+ Add Room" or "Import JSON" above.
                     </div>
                   )}
                 </div>
@@ -972,19 +1139,28 @@ export default function App() {
               </div>
 
               {sessionUser.role === 'admin' && (
-                <button
-                  onClick={() => {
-                    setEditingStudent({ 
-                      name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Wing', room_no: '', 
-                      phone: '', father_name: '', address: '', joining_date: new Date().toISOString().split('T')[0], fee_status: 'Paid' 
-                    });
-                    setIsEditStudentModalOpen(true);
-                  }}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Register Resident</span>
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                  >
+                    <FileJson className="w-3.5 h-3.5" />
+                    <span>Import JSON</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingStudent({ 
+                        name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Block', room_no: '', 
+                        phone: '', father_name: '', address: '', joining_date: new Date().toISOString().split('T')[0], fee_status: 'Paid' 
+                      });
+                      setIsEditStudentModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Register Resident</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -1025,6 +1201,8 @@ export default function App() {
                     className={`w-full p-1.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                   >
                     <option value="ALL">All Batches</option>
+                    <option value="2019">2019</option>
+                    <option value="2020">2020</option>
                     <option value="2021">2021</option>
                     <option value="2022">2022</option>
                     <option value="2023">2023</option>
@@ -1118,7 +1296,7 @@ export default function App() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="8" className="p-8 text-center text-slate-400 italic">No resident records found. Click "+ Register Resident" above to add entries.</td>
+                      <td colSpan="8" className="p-8 text-center text-slate-400 italic">No resident records found. Click "Import JSON" or "+ Register Resident" to add entries.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1289,7 +1467,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 6: HOSTEL MAP (WITH UPLOAD CAPABILITY) */}
+        {/* VIEW 6: HOSTEL MAP */}
         {activeTab === 'map' && (
           <div className="p-6 space-y-4 max-w-5xl mx-auto w-full">
             <div className="flex justify-between items-center">
@@ -1586,7 +1764,7 @@ export default function App() {
                   onClick={() => {
                     setTransferData({ 
                       studentId: selectedStudent.id, 
-                      targetBlock: 'Office Wing', 
+                      targetBlock: 'Office Block', 
                       targetRoom: '', 
                       transferDate: new Date().toISOString().split('T')[0],
                       academicYear: '2026-27',
@@ -1970,7 +2148,7 @@ export default function App() {
               <div>
                 <label className="font-bold block mb-1 text-slate-500">Block</label>
                 <select
-                  value={editingStudent.block || 'Office Wing'}
+                  value={editingStudent.block || 'Office Block'}
                   onChange={e => setEditingStudent({ ...editingStudent, block: e.target.value })}
                   className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                 >
