@@ -302,10 +302,14 @@ export default function App() {
     }
   };
 
-  // Fetch JSON directly from relative data path or root path
+  // Updated fetcher to handle public folder structure safely
   const loadJSONFromRepo = async (showPrompt = true) => {
     setIsFetchingJson(true);
-    const paths = ['/data/OBH_ROOM_REGISTER.json', '/OBH_ROOM_REGISTER.json', './data/OBH_ROOM_REGISTER.json'];
+    // Relative URLs point to files inside the project's public/ folder when deployed on Vercel
+    const paths = [
+      '/data/OBH_ROOM_REGISTER.json', 
+      '/OBH_ROOM_REGISTER.json'
+    ];
     let success = false;
 
     for (const path of paths) {
@@ -323,10 +327,21 @@ export default function App() {
     }
 
     setIsFetchingJson(false);
+    
+    // Only show alert if the user manually clicked "Sync Repo JSON"
     if (!success && showPrompt) {
-      alert("Could not fetch OBH_ROOM_REGISTER.json automatically. Please check file path or upload manually.");
+      alert("Could not fetch OBH_ROOM_REGISTER.json.\n\nPlease ensure 'OBH_ROOM_REGISTER.json' is placed in your repository's 'public/data/' or 'public/' folder.");
     }
   };
+
+  // Auto-fetch on site load without throwing popups if not yet uploaded
+  useEffect(() => {
+    const savedStudents = localStorage.getItem('obh_db_students_v3');
+    if (!savedStudents || JSON.parse(savedStudents || '[]').length === 0) {
+      loadJSONFromRepo(false); // false = silent auto-load mode
+    }
+  }, []);
+
 
   // Export current room register as JSON file to update repository
   const handleExportJSON = () => {
