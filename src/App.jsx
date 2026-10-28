@@ -6,7 +6,7 @@ import {
   Moon, Sun, Sparkles, X, Eye, 
   Upload, Database, Copy, Settings, LogOut, Lock, Mail,
   Map, Image as ImageIcon, Trash2, Calendar, CreditCard, Phone, User, FileText, CheckCircle, AlertCircle,
-  Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson
+  Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson, Download, RefreshCw
 } from 'lucide-react';
 
 // --- DEFAULT CONFIGURATION ---
@@ -52,7 +52,7 @@ export default function App() {
     return null;
   }, [config.supabaseUrl, config.supabaseAnonKey]);
 
-  // Hidden File Input Ref for JSON Upload
+  // Hidden File Input Ref for Manual JSON Upload
   const fileInputRef = useRef(null);
 
   // Auth State
@@ -66,6 +66,7 @@ export default function App() {
   // UI State
   const [darkMode, setDarkMode] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isFetchingJson, setIsFetchingJson] = useState(false);
 
   // DATA STORES WITH BLOCK NORMALIZATION MIGRATION
   const [students, setStudents] = useState(() => {
@@ -151,6 +152,209 @@ export default function App() {
     if (hostelMapUrl) localStorage.setItem('obh_hostel_map_v3', hostelMapUrl);
     else localStorage.removeItem('obh_hostel_map_v3');
   }, [hostelMapUrl]);
+
+  // --- AUTOMATIC REPO JSON INITIALIZER ---
+  useEffect(() => {
+    const savedStudents = localStorage.getItem('obh_db_students_v3');
+    const savedRooms = localStorage.getItem('obh_db_rooms_v3');
+
+    // Auto-fetch static JSON if no local data exists yet
+    if (!savedStudents || JSON.parse(savedStudents || '[]').length === 0) {
+      loadJSONFromRepo(false);
+    }
+  }, []);
+
+  // Shared Data Parser
+  const parseAndApplyJSON = (rawData, showPrompt = true) => {
+    if (!Array.isArray(rawData) && typeof rawData === 'object' && rawData !== null) {
+      const possibleArray = Object.values(rawData).find(Array.isArray);
+      if (possibleArray) rawData = possibleArray;
+      else {
+        if (showPrompt) alert("Invalid JSON: Expected an array of student/room records.");
+        return;
+      }
+    }
+
+    if (!Array.isArray(rawData) || rawData.length === 0) {
+      if (showPrompt) alert("Invalid JSON format or empty records array.");
+      return;
+    }
+
+    const importedStudents = [];
+    const importedRoomsMap = new Map();
+    let currentBlock = 'Office Block';
+
+    rawData.forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+
+      let rawBlockVal = item.Block || item.block || item.BLOCK || item.Wing || item.wing;
+      if (rawBlockVal && String(rawBlockVal).trim() !== '') {
+        currentBlock = String(rawBlockVal).trim();
+      }
+
+      const matchedBlock = normalizeBlockName(currentBlock);
+      const roomNoVal = String(item['Room No'] || item['Room No.'] || item.room_no || item.roomNo || item.Room || item.ROOM || '').trim();
+      const batchVal = String(item.BATCH || item.Batch || item.batch || '2023').trim();
+
+      const occupants = [];
+      Object.keys(item).forEach(key => {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey.includes('occupant') || lowerKey.includes('col_') || lowerKey.includes('student') || lowerKey.includes('resident')) {
+          const val = String(item[key] || '').trim();
+          if (val && val !== 'null' && val !== 'undefined' && !['GUEST ROOM', 'TV ROOM', 'OFFICE', 'STORE ROOM', 'VACANT', 'NONE'].includes(val.toUpperCase())) {
+            const names = val.split('\n').map(n => n.trim()).filter(n => n.length > 0 && n.toUpperCase() !== 'VACANT');
+            occupants.push(...names);
+          }
+        }
+      });
+
+      if (occupants.length === 0 && (item.name || item.Name || item.student_name)) {
+        const nameStr = String(item.name || item.Name || item.student_name).trim();
+        if (nameStr) occupants.push(nameStr);
+      }
+
+      if (roomNoVal && roomNoVal.toLowerCase() !== 'unassigned') {
+        const roomKey = `${matchedBlock}_${roomNoVal}`;
+        const explicitSeater = parseInt(item.seater || item.Seater || item.capacity, 10);
+        const existingSeater = importedRoomsMap.get(roomKey)?.seater || 1;
+        const calculatedSeater = explicitSeater || Math.max(parseInt(existingSeater, 10), occupants.length, 1);
+
+        importedRoomsMap.set(roomKey, {
+          id: `rm_${roomKey}`,
+          block: matchedBlock,
+          room_no: roomNoVal,
+          seater: String(calculatedSeater),
+          notes: ''
+        });
+
+        occupants.forEach((rawName) => {
+          let course = 'MBBS';
+          let cleanName = rawName;
+          if (rawName.includes('(BDS)')) {
+            course = 'BDS';
+            cleanName = rawName.replace('(BDS)', '').trim();
+          } else if (rawName.includes('(MD/MS)') || rawName.includes('(MD)') || rawName.includes('(MS)')) {
+            course = 'MD/MS';
+            cleanName = rawName.replace(/\(MD\/MS\)|\(MD\)|\(MS\)/gi, '').trim();
+          }
+
+          importedStudents.push({
+            id: item.id || `std_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            name: cleanName,
+            email: item.email || `${cleanName.toLowerCase().replace(/\s+/g, '.')}@hostel.edu`,
+            roll_no: item.roll_no || item.rollNo || '',
+            course: item.course || course,
+            batch: item.batch || batchVal,
+            block: matchedBlock,
+            room_no: roomNoVal,
+            phone: item.phone || '',
+            father_name: item.father_name || item.fatherName || '',
+            address: item.address || '',
+            joining_date: item.joining_date || new Date().toISOString().split('T')[0],
+            fee_status: item.fee_status || 'Paid',
+            status: item.status || 'approved',
+            role: item.role || 'resident',
+            fee_ledger: item.fee_ledger || [
+              {
+                year: '2026-27',
+                block: matchedBlock,
+                room_no: roomNoVal,
+                amount: 45000,
+                paid: 45000,
+                status: 'Paid',
+                date: new Date().toISOString().split('T')[0]
+              }
+            ],
+            history: item.history || [
+              {
+                oldRoom: 'None',
+                oldBlock: 'None',
+                newRoom: roomNoVal,
+                newBlock: matchedBlock,
+                date: new Date().toISOString().split('T')[0],
+                reason: 'Imported from JSON Register'
+              }
+            ]
+          });
+        });
+      }
+    });
+
+    if (importedStudents.length === 0 && importedRoomsMap.size === 0) {
+      if (showPrompt) alert("No valid room or resident records could be parsed from JSON.");
+      return;
+    }
+
+    setStudents(prev => {
+      const existingMap = new Map(prev.map(s => [`${s.name}_${normalizeBlockName(s.block)}_${s.room_no}`, s]));
+      importedStudents.forEach(s => existingMap.set(`${s.name}_${s.block}_${s.room_no}`, s));
+      return Array.from(existingMap.values());
+    });
+
+    setRooms(prev => {
+      const roomMap = new Map(prev.map(r => [`${normalizeBlockName(r.block)}_${r.room_no}`, r]));
+      importedRoomsMap.forEach((r, k) => roomMap.set(k, r));
+      return Array.from(roomMap.values());
+    });
+
+    if (showPrompt) {
+      alert(`Loaded ${importedStudents.length} residents & ${importedRoomsMap.size} rooms automatically from JSON!`);
+    }
+  };
+
+  // Fetch JSON directly from relative data path or root path
+  const loadJSONFromRepo = async (showPrompt = true) => {
+    setIsFetchingJson(true);
+    const paths = ['/data/OBH_ROOM_REGISTER.json', '/OBH_ROOM_REGISTER.json', './data/OBH_ROOM_REGISTER.json'];
+    let success = false;
+
+    for (const path of paths) {
+      try {
+        const response = await fetch(path);
+        if (response.ok) {
+          const rawData = await response.json();
+          parseAndApplyJSON(rawData, showPrompt);
+          success = true;
+          break;
+        }
+      } catch (e) {
+        console.warn(`Could not fetch from ${path}`, e);
+      }
+    }
+
+    setIsFetchingJson(false);
+    if (!success && showPrompt) {
+      alert("Could not fetch OBH_ROOM_REGISTER.json automatically. Please check file path or upload manually.");
+    }
+  };
+
+  // Export current room register as JSON file to update repository
+  const handleExportJSON = () => {
+    const exportData = rooms.map(rm => {
+      const occupants = students.filter(s => normalizeBlockName(s.block) === normalizeBlockName(rm.block) && s.room_no === rm.room_no);
+      const record = {
+        Block: rm.block,
+        "Room No": rm.room_no,
+        BATCH: occupants[0]?.batch || '2023',
+        seater: rm.seater
+      };
+      occupants.forEach((occ, idx) => {
+        let nameStr = occ.name;
+        if (occ.course === 'BDS') nameStr += ' (BDS)';
+        else if (occ.course === 'MD/MS') nameStr += ' (MD/MS)';
+        record[`Occupant ${idx + 1}`] = nameStr;
+      });
+      return record;
+    });
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", "OBH_ROOM_REGISTER.json");
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
 
   // Auth Sync Listener
   useEffect(() => {
@@ -289,7 +493,6 @@ export default function App() {
     setSessionUser(null);
   };
 
-  // --- ROBUST JSON FILE IMPORT HANDLER ---
   const handleImportJSON = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -298,163 +501,17 @@ export default function App() {
     reader.onload = (event) => {
       try {
         let text = event.target.result;
-
-        // 1. Strip UTF-8 Byte Order Mark (BOM) if present
-        if (text.charCodeAt(0) === 0xFEFF) {
-          text = text.slice(1);
-        }
-
-        // 2. Sanitize unquoted NaN values generated by pandas/Python json export
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
         text = text.replace(/:\s*NaN\b/g, ': null');
-
-        let rawData = JSON.parse(text);
-
-        // 3. Handle object-wrapped arrays (e.g. { "data": [...] } or { "records": [...] })
-        if (!Array.isArray(rawData) && typeof rawData === 'object' && rawData !== null) {
-          const possibleArray = Object.values(rawData).find(Array.isArray);
-          if (possibleArray) {
-            rawData = possibleArray;
-          } else {
-            alert("Invalid JSON: Expected an array of student/room records.");
-            return;
-          }
-        }
-
-        if (!Array.isArray(rawData) || rawData.length === 0) {
-          alert("Invalid JSON format or empty records array.");
-          return;
-        }
-
-        const importedStudents = [];
-        const importedRoomsMap = new Map();
-        let currentBlock = 'Office Block';
-
-        rawData.forEach((item, idx) => {
-          if (!item || typeof item !== 'object') return;
-
-          // Identify block if specified or forward fill
-          let rawBlockVal = item.Block || item.block || item.BLOCK || item.Wing || item.wing;
-          if (rawBlockVal && String(rawBlockVal).trim() !== '') {
-            currentBlock = String(rawBlockVal).trim();
-          }
-
-          const matchedBlock = normalizeBlockName(currentBlock);
-          const roomNoVal = String(item['Room No'] || item['Room No.'] || item.room_no || item.roomNo || item.Room || item.ROOM || '').trim();
-          const batchVal = String(item.BATCH || item.Batch || item.batch || '2023').trim();
-
-          // Extract occupants from JSON keys (PDF extract column structures + object properties)
-          const occupants = [];
-          Object.keys(item).forEach(key => {
-            const lowerKey = key.toLowerCase();
-            if (lowerKey.includes('occupant') || lowerKey.includes('col_') || lowerKey.includes('student') || lowerKey.includes('resident')) {
-              const val = String(item[key] || '').trim();
-              if (val && val !== 'null' && val !== 'undefined' && !['GUEST ROOM', 'TV ROOM', 'OFFICE', 'STORE ROOM', 'VACANT', 'NONE'].includes(val.toUpperCase())) {
-                const names = val.split('\n').map(n => n.trim()).filter(n => n.length > 0 && n.toUpperCase() !== 'VACANT');
-                occupants.push(...names);
-              }
-            }
-          });
-
-          // Direct student object format fallback
-          if (occupants.length === 0 && (item.name || item.Name || item.student_name)) {
-            const nameStr = String(item.name || item.Name || item.student_name).trim();
-            if (nameStr) occupants.push(nameStr);
-          }
-
-          if (roomNoVal && roomNoVal.toLowerCase() !== 'unassigned') {
-            const roomKey = `${matchedBlock}_${roomNoVal}`;
-            const explicitSeater = parseInt(item.seater || item.Seater || item.capacity, 10);
-            const existingSeater = importedRoomsMap.get(roomKey)?.seater || 1;
-            
-            const calculatedSeater = explicitSeater || Math.max(parseInt(existingSeater, 10), occupants.length, 1);
-
-            importedRoomsMap.set(roomKey, {
-              id: `rm_${roomKey}`,
-              block: matchedBlock,
-              room_no: roomNoVal,
-              seater: String(calculatedSeater),
-              notes: ''
-            });
-
-            occupants.forEach((rawName) => {
-              let course = 'MBBS';
-              let cleanName = rawName;
-              if (rawName.includes('(BDS)')) {
-                course = 'BDS';
-                cleanName = rawName.replace('(BDS)', '').trim();
-              } else if (rawName.includes('(MD/MS)') || rawName.includes('(MD)') || rawName.includes('(MS)')) {
-                course = 'MD/MS';
-                cleanName = rawName.replace(/\(MD\/MS\)|\(MD\)|\(MS\)/gi, '').trim();
-              }
-
-              importedStudents.push({
-                id: item.id || `std_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-                name: cleanName,
-                email: item.email || `${cleanName.toLowerCase().replace(/\s+/g, '.')}@hostel.edu`,
-                roll_no: item.roll_no || item.rollNo || '',
-                course: item.course || course,
-                batch: item.batch || batchVal,
-                block: matchedBlock,
-                room_no: roomNoVal,
-                phone: item.phone || '',
-                father_name: item.father_name || item.fatherName || '',
-                address: item.address || '',
-                joining_date: item.joining_date || new Date().toISOString().split('T')[0],
-                fee_status: item.fee_status || 'Paid',
-                status: item.status || 'approved',
-                role: item.role || 'resident',
-                fee_ledger: item.fee_ledger || [
-                  {
-                    year: '2026-27',
-                    block: matchedBlock,
-                    room_no: roomNoVal,
-                    amount: 45000,
-                    paid: 45000,
-                    status: 'Paid',
-                    date: new Date().toISOString().split('T')[0]
-                  }
-                ],
-                history: item.history || [
-                  {
-                    oldRoom: 'None',
-                    oldBlock: 'None',
-                    newRoom: roomNoVal,
-                    newBlock: matchedBlock,
-                    date: new Date().toISOString().split('T')[0],
-                    reason: 'Imported from JSON Register'
-                  }
-                ]
-              });
-            });
-          }
-        });
-
-        if (importedStudents.length === 0 && importedRoomsMap.size === 0) {
-          alert("No valid room or resident records could be parsed from this JSON file.");
-          return;
-        }
-
-        // Merge into state safely
-        setStudents(prev => {
-          const existingMap = new Map(prev.map(s => [`${s.name}_${normalizeBlockName(s.block)}_${s.room_no}`, s]));
-          importedStudents.forEach(s => existingMap.set(`${s.name}_${s.block}_${s.room_no}`, s));
-          return Array.from(existingMap.values());
-        });
-
-        setRooms(prev => {
-          const roomMap = new Map(prev.map(r => [`${normalizeBlockName(r.block)}_${r.room_no}`, r]));
-          importedRoomsMap.forEach((r, k) => roomMap.set(k, r));
-          return Array.from(roomMap.values());
-        });
-
-        alert(`Successfully imported ${importedStudents.length} residents and configured ${importedRoomsMap.size} rooms across blocks!`);
+        const rawData = JSON.parse(text);
+        parseAndApplyJSON(rawData, true);
       } catch (err) {
         console.error("JSON Read Error:", err);
         alert("Error parsing JSON file. Please ensure it is a valid JSON document.");
       }
     };
     reader.readAsText(file);
-    e.target.value = ''; // Reset input
+    e.target.value = '';
   };
 
   // Derived Approved / Pending lists
@@ -580,7 +637,7 @@ export default function App() {
     }
   };
 
-  // Save/Update Resident Record with Capacity Validation
+  // Save/Update Resident Record
   const handleSaveStudent = (e) => {
     e.preventDefault();
     if (sessionUser?.role !== 'admin') return alert('Access Denied');
@@ -941,13 +998,32 @@ export default function App() {
 
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 text-xs space-y-2">
           {sessionUser.role === 'admin' && (
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center space-x-2 transition shadow"
-            >
-              <FileJson className="w-4 h-4" />
-              <span>Import JSON File</span>
-            </button>
+            <>
+              <button
+                onClick={() => loadJSONFromRepo(true)}
+                disabled={isFetchingJson}
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex items-center justify-center space-x-2 transition shadow"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isFetchingJson ? 'animate-spin' : ''}`} />
+                <span>{isFetchingJson ? 'Fetching JSON...' : 'Sync Repo JSON'}</span>
+              </button>
+
+              <button
+                onClick={handleExportJSON}
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center space-x-2 transition shadow"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export JSON File</span>
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center space-x-2 transition shadow"
+              >
+                <FileJson className="w-3.5 h-3.5" />
+                <span>Upload Local JSON</span>
+              </button>
+            </>
           )}
 
           <button
@@ -1075,11 +1151,18 @@ export default function App() {
               {sessionUser.role === 'admin' && (
                 <div className="flex items-center space-x-2">
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => loadJSONFromRepo(true)}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Sync Repo JSON</span>
+                  </button>
+                  <button
+                    onClick={handleExportJSON}
                     className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
                   >
-                    <FileJson className="w-3.5 h-3.5" />
-                    <span>Import JSON</span>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Export JSON</span>
                   </button>
                   <button
                     onClick={() => setIsAddRoomModalOpen(true)}
@@ -1195,7 +1278,7 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="p-6 text-center text-xs text-slate-400 italic">
-                      No rooms configured in {blockName}. Click "+ Add Room" or "Import JSON" above.
+                      No rooms configured in {blockName}. Click "+ Add Room" or "Sync Repo JSON" above.
                     </div>
                   )}
                 </div>
@@ -1216,11 +1299,18 @@ export default function App() {
               {sessionUser.role === 'admin' && (
                 <div className="flex items-center space-x-2">
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => loadJSONFromRepo(true)}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Sync Repo JSON</span>
+                  </button>
+                  <button
+                    onClick={handleExportJSON}
                     className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
                   >
-                    <FileJson className="w-3.5 h-3.5" />
-                    <span>Import JSON</span>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Export JSON</span>
                   </button>
                   <button
                     onClick={() => {
@@ -1230,7 +1320,7 @@ export default function App() {
                       });
                       setIsEditStudentModalOpen(true);
                     }}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Register Resident</span>
@@ -1371,7 +1461,7 @@ export default function App() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="8" className="p-8 text-center text-slate-400 italic">No resident records found. Click "Import JSON" or "+ Register Resident" to add entries.</td>
+                      <td colSpan="8" className="p-8 text-center text-slate-400 italic">No resident records found. Click "Sync Repo JSON" or "+ Register Resident" to add entries.</td>
                     </tr>
                   )}
                 </tbody>
