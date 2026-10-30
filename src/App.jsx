@@ -7,7 +7,7 @@ import {
   Upload, Database, Copy, Settings, LogOut, Lock, Mail,
   Map as MapIcon, Image as ImageIcon, Trash2, Calendar, CreditCard, Phone, User, FileText, CheckCircle, AlertCircle,
   Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson, Download, RefreshCw,
-  ChevronDown, ChevronUp, SlidersHorizontal, Info, MoreVertical
+  ChevronDown, ChevronUp, SlidersHorizontal, Info, MoreVertical, Link2
 } from 'lucide-react';
 
 // --- DEFAULT CONFIGURATION ---
@@ -183,6 +183,12 @@ export default function App() {
     academicYear: '2026-27',
     reason: '' 
   });
+
+  // Link Pending Resident to Existing Profile Modal State
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+  const [linkingPendingUser, setLinkingPendingUser] = useState(null);
+  const [linkSearchQuery, setLinkSearchQuery] = useState('');
+  const [selectedResidentToLink, setSelectedResidentToLink] = useState(null);
 
   const [isNoticeModalOpen, setIsNoticeModalOpen] = useState(false);
   const [newNotice, setNewNotice] = useState({ title: '', body: '', file_url: '', file_name: '', priority: 'General' });
@@ -672,6 +678,33 @@ export default function App() {
     };
   }, [rooms, approvedStudents]);
 
+  // Total matching rooms count across all blocks when searching on Rooms page
+  const totalMatchingRooms = useMemo(() => {
+    if (!roomSearchQuery.trim()) return null;
+    const q = roomSearchQuery.toLowerCase();
+    let count = 0;
+    HOSTEL_BLOCKS.forEach(blockName => {
+      const blockRooms = rooms.filter(r => normalizeBlockName(r.block) === blockName);
+      blockRooms.forEach(rm => {
+        const occupants = approvedStudents.filter(s => 
+          normalizeBlockName(s.block) === blockName && 
+          String(s.room_no || s.roomNo || '').trim() === String(rm.room_no).trim()
+        );
+        const capacity = parseInt(rm.seater, 10) || 1;
+        const occCount = occupants.length;
+
+        if (roomFilterStatus === 'VACANT' && occCount > 0) return;
+        if (roomFilterStatus === 'PARTIAL' && (occCount === 0 || occCount >= capacity)) return;
+        if (roomFilterStatus === 'FULL' && occCount < capacity) return;
+
+        const matchesRoom = rm.room_no.toLowerCase().includes(q);
+        const matchesOccupant = occupants.some(occ => occ.name.toLowerCase().includes(q));
+        if (matchesRoom || matchesOccupant) count++;
+      });
+    });
+    return count;
+  }, [rooms, approvedStudents, roomSearchQuery, roomFilterStatus]);
+
   // Master Directory Filters
   const filteredStudents = useMemo(() => {
     return approvedStudents.filter(s => {
@@ -869,6 +902,44 @@ export default function App() {
     setStudents(prev => prev.map(s => s.id === student.id ? updatedStudent : s));
     setIsTransferModalOpen(false);
     if (selectedStudent?.id === student.id) setSelectedStudent(updatedStudent);
+  };
+
+  // Linking Pending User to Existing Resident Record
+  const handleConfirmLink = (pendingUser, existingResident) => {
+    if (!pendingUser || !existingResident) return;
+
+    const targetEmail = pendingUser.email;
+
+    setStudents(prev => {
+      const filtered = prev.filter(s => s.id !== pendingUser.id);
+      return filtered.map(s => {
+        if (s.id === existingResident.id) {
+          return {
+            ...s,
+            email: targetEmail,
+            status: 'approved',
+            role: s.role || 'resident'
+          };
+        }
+        return s;
+      });
+    });
+
+    if (sessionUser && (sessionUser.id === pendingUser.id || sessionUser.email?.toLowerCase() === targetEmail?.toLowerCase())) {
+      const updated = {
+        ...existingResident,
+        email: targetEmail,
+        status: 'approved',
+        role: existingResident.role || 'resident',
+        block: normalizeBlockName(existingResident.block)
+      };
+      setSessionUser(updated);
+    }
+
+    setIsLinkModalOpen(false);
+    setLinkingPendingUser(null);
+    setSelectedResidentToLink(null);
+    alert(`Successfully linked ${targetEmail} to ${existingResident.name}!`);
   };
 
   // Post Notice
@@ -1158,7 +1229,7 @@ export default function App() {
               <span>Hostel Map</span>
             </button>
 
-            {sessionUser.role === 'admin' && (
+            {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
               <button
                 onClick={() => setActiveTab('approval')}
                 className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'approval' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
@@ -1413,7 +1484,7 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center space-x-2 w-full sm:w-auto">
-                  <div className="relative flex-1 sm:w-48">
+                  <div className="relative flex-1 sm:w-56">
                     <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                     <input
                       type="text"
@@ -1423,6 +1494,11 @@ export default function App() {
                       className={`w-full pl-8 pr-3 py-1.5 rounded-xl border text-xs ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                     />
                   </div>
+                  {roomSearchQuery.trim() !== '' && totalMatchingRooms !== null && (
+                    <span className="px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 font-bold text-[11px] whitespace-nowrap border border-indigo-200 dark:border-indigo-900">
+                      {totalMatchingRooms} {totalMatchingRooms === 1 ? 'room' : 'rooms'} found
+                    </span>
+                  )}
                   <select
                     value={roomSortOption}
                     onChange={e => setRoomSortOption(e.target.value)}
@@ -1493,7 +1569,12 @@ export default function App() {
                 return a.room_no.localeCompare(b.room_no, undefined, { numeric: true });
               });
 
-              const isCollapsed = collapsedBlocks[blockName];
+              const isSearching = roomSearchQuery.trim().length > 0;
+              // If searching and this block has 0 matching rooms, hide block completely
+              if (isSearching && blockRooms.length === 0) return null;
+
+              // Auto-expand during search; otherwise respect user collapse state
+              const isCollapsed = isSearching ? false : collapsedBlocks[blockName];
 
               return (
                 <div key={blockName} className={`p-4 sm:p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3`}>
@@ -1509,6 +1590,11 @@ export default function App() {
                       {bStat.fullyVacant > 0 && (
                         <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold text-[10px]">
                           {bStat.fullyVacant} Vacant Rooms
+                        </span>
+                      )}
+                      {isSearching && (
+                        <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400 font-bold text-[10px]">
+                          {blockRooms.length} Matched
                         </span>
                       )}
                     </div>
@@ -2067,23 +2153,42 @@ export default function App() {
         )}
 
         {/* VIEW 7: APPROVAL DESK */}
-        {activeTab === 'approval' && sessionUser.role === 'admin' && (
+        {activeTab === 'approval' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
           <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4 w-full">
-            <h2 className="text-lg sm:text-xl font-bold">Pending Registrations</h2>
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-lg sm:text-xl font-bold">Pending Registrations</h2>
+                <p className="text-xs text-slate-500">Approve new residents or link logged-in accounts to pre-existing resident records.</p>
+              </div>
+            </div>
             <div className="space-y-3">
               {pendingStudents.length > 0 ? (
                 pendingStudents.map(user => (
-                  <div key={user.id} className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} flex justify-between items-center`}>
+                  <div key={user.id} className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-sm`}>
                     <div>
                       <p className="font-bold text-sm">{user.name}</p>
-                      <p className="text-xs text-slate-400">{user.email}</p>
+                      <p className="text-xs text-slate-400 font-mono">{user.email}</p>
                     </div>
-                    <button
-                      onClick={() => setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'resident' } : s))}
-                      className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow"
-                    >
-                      Approve Resident
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                      <button
+                        onClick={() => {
+                          setLinkingPendingUser(user);
+                          setLinkSearchQuery('');
+                          setSelectedResidentToLink(null);
+                          setIsLinkModalOpen(true);
+                        }}
+                        className="flex-1 sm:flex-none px-3.5 py-2 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-400 font-bold text-xs rounded-xl border border-indigo-200 dark:border-indigo-900 transition flex items-center justify-center space-x-1.5"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>Link to Existing Resident</span>
+                      </button>
+                      <button
+                        onClick={() => setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'resident' } : s))}
+                        className="flex-1 sm:flex-none px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow transition"
+                      >
+                        Approve as New Resident
+                      </button>
+                    </div>
                   </div>
                 ))
               ) : (
@@ -2096,6 +2201,110 @@ export default function App() {
       </main>
 
       {/* --- MODALS & BOTTOM SHEETS --- */}
+
+      {/* LINK TO EXISTING RESIDENT MODAL */}
+      {isLinkModalOpen && linkingPendingUser && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className={`w-full max-w-lg rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl my-8`}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h3 className="font-bold text-base flex items-center space-x-2">
+                  <Link2 className="w-4 h-4 text-indigo-500" />
+                  <span>Link to Existing Resident</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Linking account <strong className="text-indigo-500">{linkingPendingUser.email}</strong>
+                </p>
+              </div>
+              <button onClick={() => { setIsLinkModalOpen(false); setLinkingPendingUser(null); setSelectedResidentToLink(null); }}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {!selectedResidentToLink ? (
+              <>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-3 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by Name, Room, Block, Batch..."
+                    value={linkSearchQuery}
+                    onChange={e => setLinkSearchQuery(e.target.value)}
+                    className={`w-full pl-8 pr-3 py-2 rounded-xl border text-xs ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                  />
+                </div>
+
+                <div className="max-h-64 overflow-y-auto space-y-2 pr-1 text-xs">
+                  {approvedStudents
+                    .filter(std => {
+                      if (!linkSearchQuery.trim()) return true;
+                      const q = linkSearchQuery.toLowerCase();
+                      return (
+                        std.name.toLowerCase().includes(q) ||
+                        (std.room_no || '').toLowerCase().includes(q) ||
+                        normalizeBlockName(std.block).toLowerCase().includes(q) ||
+                        (std.batch || '').toLowerCase().includes(q) ||
+                        (std.course || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map(std => (
+                      <div key={std.id} className={`p-3 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'} flex justify-between items-center hover:border-indigo-500 transition`}>
+                        <div>
+                          <p className="font-bold text-sm">{std.name}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {normalizeBlockName(std.block)} • Rm {std.room_no || 'Unassigned'} • Batch {std.batch} ({std.course})
+                          </p>
+                          {std.email && !std.email.endsWith('@hostel.edu') && (
+                            <p className="text-[10px] text-amber-500 font-medium mt-0.5">Linked: {std.email}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setSelectedResidentToLink(std)}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow transition"
+                        >
+                          Link Profile
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4 text-xs">
+                <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/50 space-y-2">
+                  <h4 className="font-bold text-sm text-indigo-600 dark:text-indigo-400">Confirm Account Linking</h4>
+                  <p className="text-slate-600 dark:text-slate-300">
+                    Are you sure you want to link <strong className="text-indigo-500">{linkingPendingUser.email}</strong> to this resident?
+                  </p>
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1">
+                    <p className="font-extrabold text-sm">{selectedResidentToLink.name}</p>
+                    <p className="text-[11px] text-slate-400">
+                      Block: {normalizeBlockName(selectedResidentToLink.block)} | Room: {selectedResidentToLink.room_no || 'Unassigned'} | Batch: {selectedResidentToLink.batch} ({selectedResidentToLink.course})
+                    </p>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    This will grant this user access to all room records, fee ledgers, and movement history associated with this resident profile.
+                  </p>
+                </div>
+
+                <div className="flex justify-end space-x-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    onClick={() => setSelectedResidentToLink(null)}
+                    className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl text-xs"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={() => handleConfirmLink(linkingPendingUser, selectedResidentToLink)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow transition"
+                  >
+                    Confirm & Link Profile
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ADMIN TOOLS & DATA MODAL / BOTTOM SHEET */}
       {isAdminToolsOpen && (
