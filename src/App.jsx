@@ -18,6 +18,12 @@ const DEFAULT_CONFIG = {
 const HOSTEL_BLOCKS = ['NCC Block', 'Office Block', 'Mathura (North)', 'Mathura (South)', 'Tennis Block', 'PG Block'];
 const ADMIN_EMAILS = ['dr.ankitraj8558@gmail.com', 'ankit.raj@hostel.edu'];
 
+// Files are served from the project's public/ folder (public/data/... -> /data/...)
+const REGISTER_PATHS = ['/data/OBH_ROOM_REGISTER.json', '/OBH_ROOM_REGISTER.json'];
+
+// Words in occupant cells that are NOT residents
+const NON_RESIDENT_WORDS = ['GUEST ROOM', 'TV ROOM', 'OFFICE', 'STORE ROOM', 'VACANT', 'NONE', 'NULL', 'UNDEFINED', 'NAN', '-'];
+
 // --- BLOCK NAME NORMALIZER ---
 const normalizeBlockName = (b) => {
   if (!b) return 'Office Block';
@@ -30,6 +36,42 @@ const normalizeBlockName = (b) => {
   if (str.includes('TENNIS')) return 'Tennis Block';
   if (str.includes('PG')) return 'PG Block';
   return 'Office Block';
+};
+
+// --- JSON CLEANER ---
+// Spreadsheet / pandas exports often contain bare NaN or Infinity, which is NOT valid JSON
+// and makes JSON.parse / response.json() throw. Convert them to null and strip any BOM.
+const sanitizeJSONText = (text) => {
+  let t = String(text || '');
+  if (t.charCodeAt(0) === 0xFEFF) t = t.slice(1);
+  return t.replace(/([:\[,]\s*)-?(NaN|Infinity)(?=\s*[,}\]])/g, '$1null');
+};
+
+// Find a value in a row by flexible column name (ignores case, spaces, dots, underscores)
+const normKey = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+const pickField = (item, names) => {
+  for (const key of Object.keys(item)) {
+    if (names.includes(normKey(key))) {
+      const v = item[key];
+      if (v !== null && v !== undefined && String(v).trim() !== '' && String(v).trim().toLowerCase() !== 'nan') {
+        return v;
+      }
+    }
+  }
+  return undefined;
+};
+
+const isOccupantKey = (key) => {
+  const k = normKey(key);
+  return (
+    k.includes('occupant') ||
+    k.includes('student') ||
+    k.includes('resident') ||
+    k.startsWith('col') ||
+    k.startsWith('unnamed') ||
+    /^name\d+$/.test(k) ||
+    /^bed\d*$/.test(k)
+  );
 };
 
 export default function App() {
@@ -90,6 +132,10 @@ export default function App() {
       return [];
     }
   });
+
+  // Always-current copy of students (used by auth sync to avoid side-effects inside state updaters)
+  const studentsRef = useRef(students);
+  studentsRef.current = students;
 
   const [notices, setNotices] = useState(() => {
     const saved = localStorage.getItem('obh_db_notices_v3');
@@ -153,69 +199,77 @@ export default function App() {
     else localStorage.removeItem('obh_hostel_map_v3');
   }, [hostelMapUrl]);
 
-  // --- AUTOMATIC REPO JSON INITIALIZER ---
+  // --- AUTOMATIC REPO JSON INITIALIZER (runs once, silently) ---
+  // Loads whenever NO ROOMS exist yet. (Previously it checked the student list, but the logged-in
+  // admin's own profile is saved as a student, so the auto-load was skipped after the first login.)
   useEffect(() => {
-    const savedStudents = localStorage.getItem('obh_db_students_v3');
-    const savedRooms = localStorage.getItem('obh_db_rooms_v3');
-
-    // Auto-fetch static JSON if no local data exists yet
-    if (!savedStudents || JSON.parse(savedStudents || '[]').length === 0) {
+    if (rooms.length === 0) {
       loadJSONFromRepo(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Shared Data Parser
+  // Shared Data Parser. Returns true when records were applied.
   const parseAndApplyJSON = (rawData, showPrompt = true) => {
+    // Accept { "Sheet1": [...], "Sheet2": [...] } style wrappers as well as plain arrays
     if (!Array.isArray(rawData) && typeof rawData === 'object' && rawData !== null) {
-      const possibleArray = Object.values(rawData).find(Array.isArray);
-      if (possibleArray) rawData = possibleArray;
+      const arrays = Object.values(rawData).filter(Array.isArray);
+      if (arrays.length > 0) rawData = arrays.flat();
       else {
         if (showPrompt) alert("Invalid JSON: Expected an array of student/room records.");
-        return;
+        return false;
       }
     }
 
     if (!Array.isArray(rawData) || rawData.length === 0) {
       if (showPrompt) alert("Invalid JSON format or empty records array.");
-      return;
+      return false;
     }
 
     const importedStudents = [];
     const importedRoomsMap = new Map();
     let currentBlock = 'Office Block';
+    let currentBatch = '2023';
+    let skippedRows = 0;
+    let idCounter = 0;
 
     rawData.forEach((item) => {
-      if (!item || typeof item !== 'object') return;
+      if (!item || typeof item !== 'object') { skippedRows++; return; }
 
-      let rawBlockVal = item.Block || item.block || item.BLOCK || item.Wing || item.wing;
-      if (rawBlockVal && String(rawBlockVal).trim() !== '') {
-        currentBlock = String(rawBlockVal).trim();
-      }
+      // Block / Batch carry forward from previous rows when the sheet leaves them blank (merged cells)
+      const rawBlockVal = pickField(item, ['block', 'wing', 'hostelblock']);
+      if (rawBlockVal !== undefined) currentBlock = String(rawBlockVal).trim();
+
+      const rawBatchVal = pickField(item, ['batch', 'year']);
+      if (rawBatchVal !== undefined) currentBatch = String(rawBatchVal).trim();
 
       const matchedBlock = normalizeBlockName(currentBlock);
-      const roomNoVal = String(item['Room No'] || item['Room No.'] || item.room_no || item.roomNo || item.Room || item.ROOM || '').trim();
-      const batchVal = String(item.BATCH || item.Batch || item.batch || '2023').trim();
+      const roomRaw = pickField(item, ['roomno', 'room', 'roomnumber']);
+      const roomNoVal = roomRaw !== undefined ? String(roomRaw).trim() : '';
 
       const occupants = [];
       Object.keys(item).forEach(key => {
-        const lowerKey = key.toLowerCase();
-        if (lowerKey.includes('occupant') || lowerKey.includes('col_') || lowerKey.includes('student') || lowerKey.includes('resident')) {
-          const val = String(item[key] || '').trim();
-          if (val && val !== 'null' && val !== 'undefined' && !['GUEST ROOM', 'TV ROOM', 'OFFICE', 'STORE ROOM', 'VACANT', 'NONE'].includes(val.toUpperCase())) {
-            const names = val.split('\n').map(n => n.trim()).filter(n => n.length > 0 && n.toUpperCase() !== 'VACANT');
-            occupants.push(...names);
-          }
-        }
+        if (!isOccupantKey(key)) return;
+        const val = String(item[key] ?? '').trim();
+        if (!val) return;
+        if (/^\d+(\.\d+)?$/.test(val)) return; // serial numbers etc., not names
+        if (NON_RESIDENT_WORDS.includes(val.toUpperCase())) return;
+        const names = val
+          .split('\n')
+          .map(n => n.trim())
+          .filter(n => n.length > 0 && !NON_RESIDENT_WORDS.includes(n.toUpperCase()));
+        occupants.push(...names);
       });
 
-      if (occupants.length === 0 && (item.name || item.Name || item.student_name)) {
-        const nameStr = String(item.name || item.Name || item.student_name).trim();
-        if (nameStr) occupants.push(nameStr);
+      // Flat one-row-per-student format
+      if (occupants.length === 0) {
+        const nameVal = pickField(item, ['name', 'studentname', 'residentname']);
+        if (nameVal !== undefined) occupants.push(String(nameVal).trim());
       }
 
       if (roomNoVal && roomNoVal.toLowerCase() !== 'unassigned') {
         const roomKey = `${matchedBlock}_${roomNoVal}`;
-        const explicitSeater = parseInt(item.seater || item.Seater || item.capacity, 10);
+        const explicitSeater = parseInt(pickField(item, ['seater', 'capacity']), 10);
         const existingSeater = importedRoomsMap.get(roomKey)?.seater || 1;
         const calculatedSeater = explicitSeater || Math.max(parseInt(existingSeater, 10), occupants.length, 1);
 
@@ -230,27 +284,34 @@ export default function App() {
         occupants.forEach((rawName) => {
           let course = 'MBBS';
           let cleanName = rawName;
-          if (rawName.includes('(BDS)')) {
+          if (/\(\s*BDS\s*\)/i.test(rawName)) {
             course = 'BDS';
-            cleanName = rawName.replace('(BDS)', '').trim();
-          } else if (rawName.includes('(MD/MS)') || rawName.includes('(MD)') || rawName.includes('(MS)')) {
+            cleanName = rawName.replace(/\(\s*BDS\s*\)/gi, '').trim();
+          } else if (/\(\s*(MD\/MS|MD|MS)\s*\)/i.test(rawName)) {
             course = 'MD/MS';
-            cleanName = rawName.replace(/\(MD\/MS\)|\(MD\)|\(MS\)/gi, '').trim();
+            cleanName = rawName.replace(/\(\s*(MD\/MS|MD|MS)\s*\)/gi, '').trim();
+          } else if (/\(\s*MBBS\s*\)/i.test(rawName)) {
+            cleanName = rawName.replace(/\(\s*MBBS\s*\)/gi, '').trim();
           }
+          if (!cleanName) return;
+
+          idCounter += 1;
+          const today = new Date().toISOString().split('T')[0];
 
           importedStudents.push({
-            id: item.id || `std_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            // Every occupant needs a UNIQUE id (a shared row id would merge roommates into one record)
+            id: (occupants.length === 1 && item.id) ? item.id : `std_${Date.now()}_${idCounter}_${Math.random().toString(36).substr(2, 5)}`,
             name: cleanName,
-            email: item.email || `${cleanName.toLowerCase().replace(/\s+/g, '.')}@hostel.edu`,
+            email: item.email || `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')}@hostel.edu`,
             roll_no: item.roll_no || item.rollNo || '',
             course: item.course || course,
-            batch: item.batch || batchVal,
+            batch: String(item.batch || currentBatch),
             block: matchedBlock,
             room_no: roomNoVal,
             phone: item.phone || '',
             father_name: item.father_name || item.fatherName || '',
             address: item.address || '',
-            joining_date: item.joining_date || new Date().toISOString().split('T')[0],
+            joining_date: item.joining_date || today,
             fee_status: item.fee_status || 'Paid',
             status: item.status || 'approved',
             role: item.role || 'resident',
@@ -262,7 +323,7 @@ export default function App() {
                 amount: 45000,
                 paid: 45000,
                 status: 'Paid',
-                date: new Date().toISOString().split('T')[0]
+                date: today
               }
             ],
             history: item.history || [
@@ -271,23 +332,30 @@ export default function App() {
                 oldBlock: 'None',
                 newRoom: roomNoVal,
                 newBlock: matchedBlock,
-                date: new Date().toISOString().split('T')[0],
+                date: today,
                 reason: 'Imported from JSON Register'
               }
             ]
           });
         });
+      } else {
+        skippedRows++;
       }
     });
 
     if (importedStudents.length === 0 && importedRoomsMap.size === 0) {
-      if (showPrompt) alert("No valid room or resident records could be parsed from JSON.");
-      return;
+      if (showPrompt) alert("No valid room or resident records could be parsed from the JSON.\n\nEach row needs a 'Room No' column and occupant columns (e.g. 'Occupant 1', 'Occupant 2').");
+      return false;
     }
 
+    // Merge: keep details already saved for a resident (phone, fees, edits); refresh room data from JSON
     setStudents(prev => {
       const existingMap = new Map(prev.map(s => [`${s.name}_${normalizeBlockName(s.block)}_${s.room_no}`, s]));
-      importedStudents.forEach(s => existingMap.set(`${s.name}_${s.block}_${s.room_no}`, s));
+      importedStudents.forEach(s => {
+        const key = `${s.name}_${s.block}_${s.room_no}`;
+        const existing = existingMap.get(key);
+        existingMap.set(key, existing ? { ...s, ...existing } : s);
+      });
       return Array.from(existingMap.values());
     });
 
@@ -298,50 +366,60 @@ export default function App() {
     });
 
     if (showPrompt) {
-      alert(`Loaded ${importedStudents.length} residents & ${importedRoomsMap.size} rooms automatically from JSON!`);
+      alert(`Loaded ${importedStudents.length} residents & ${importedRoomsMap.size} rooms from JSON!` + (skippedRows > 0 ? `\n(${skippedRows} rows skipped - no room number)` : ''));
     }
+    return true;
   };
 
-  // Updated fetcher to handle public folder structure safely
+  // Fetch the register from the deployed site (public/data/OBH_ROOM_REGISTER.json)
   const loadJSONFromRepo = async (showPrompt = true) => {
     setIsFetchingJson(true);
-    // Relative URLs point to files inside the project's public/ folder when deployed on Vercel
-    const paths = [
-      '/data/OBH_ROOM_REGISTER.json', 
-      '/OBH_ROOM_REGISTER.json'
-    ];
-    let success = false;
+    const errors = [];
+    let found = false;
 
-    for (const path of paths) {
+    for (const path of REGISTER_PATHS) {
       try {
-        const response = await fetch(path);
-        if (response.ok) {
-          const rawData = await response.json();
-          parseAndApplyJSON(rawData, showPrompt);
-          success = true;
-          break;
+        // cache-buster + no-store so a freshly deployed file is never masked by an old cached/404 response
+        const response = await fetch(`${path}?v=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) {
+          errors.push(`${path} -> HTTP ${response.status}`);
+          continue;
         }
+
+        const text = await response.text();
+        if (text.trim().startsWith('<')) {
+          errors.push(`${path} -> returned a web page, not JSON (file missing from the deployed build)`);
+          continue;
+        }
+
+        let rawData;
+        try {
+          rawData = JSON.parse(sanitizeJSONText(text));
+        } catch (parseErr) {
+          errors.push(`${path} -> file found but invalid JSON (${parseErr.message})`);
+          continue;
+        }
+
+        parseAndApplyJSON(rawData, showPrompt);
+        found = true;
+        break;
       } catch (e) {
+        errors.push(`${path} -> ${e.message}`);
         console.warn(`Could not fetch from ${path}`, e);
       }
     }
 
     setIsFetchingJson(false);
-    
+
     // Only show alert if the user manually clicked "Sync Repo JSON"
-    if (!success && showPrompt) {
-      alert("Could not fetch OBH_ROOM_REGISTER.json.\n\nPlease ensure 'OBH_ROOM_REGISTER.json' is placed in your repository's 'public/data/' or 'public/' folder.");
+    if (!found && showPrompt) {
+      alert(
+        "Could not load OBH_ROOM_REGISTER.json.\n\n" +
+        errors.join('\n') +
+        "\n\nTip: open /data/OBH_ROOM_REGISTER.json on your site directly to check it loads, and make sure the latest Vercel deployment has finished. You can also use 'Upload Local JSON'."
+      );
     }
   };
-
-  // Auto-fetch on site load without throwing popups if not yet uploaded
-  useEffect(() => {
-    const savedStudents = localStorage.getItem('obh_db_students_v3');
-    if (!savedStudents || JSON.parse(savedStudents || '[]').length === 0) {
-      loadJSONFromRepo(false); // false = silent auto-load mode
-    }
-  }, []);
-
 
   // Export current room register as JSON file to update repository
   const handleExportJSON = () => {
@@ -385,47 +463,54 @@ export default function App() {
     });
 
     return () => subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
   const syncUserProfile = (authUser) => {
     const userEmail = authUser.email ? authUser.email.toLowerCase() : '';
-    const isAdminUser = ADMIN_EMAILS.includes(userEmail) || userEmail.includes('admin');
+    const isAdminUser = ADMIN_EMAILS.includes(userEmail);
+    const existing = studentsRef.current.find(s => s.email?.toLowerCase() === userEmail);
+
+    let profile;
+    if (existing) {
+      profile = {
+        ...existing,
+        block: normalizeBlockName(existing.block),
+        role: isAdminUser ? 'admin' : existing.role || 'resident',
+        status: isAdminUser ? 'approved' : existing.status || 'approved'
+      };
+    } else {
+      profile = {
+        id: authUser.id || 'usr_' + Date.now(),
+        email: authUser.email,
+        name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
+        role: isAdminUser ? 'admin' : 'resident',
+        status: isAdminUser ? 'approved' : 'pending',
+        course: 'MBBS',
+        batch: '2023',
+        roll_no: '',
+        block: 'Office Block',
+        room_no: 'Unassigned',
+        phone: '',
+        father_name: '',
+        address: '',
+        joining_date: new Date().toISOString().split('T')[0],
+        fee_status: 'Pending',
+        fee_ledger: [],
+        history: []
+      };
+    }
+
+    setSessionUser(profile);
 
     setStudents(prev => {
-      const existingIndex = prev.findIndex(s => s.email?.toLowerCase() === userEmail);
-      if (existingIndex !== -1) {
+      const idx = prev.findIndex(s => s.email?.toLowerCase() === userEmail);
+      if (idx !== -1) {
         const updated = [...prev];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          block: normalizeBlockName(updated[existingIndex].block),
-          role: isAdminUser ? 'admin' : updated[existingIndex].role || 'resident',
-          status: isAdminUser ? 'approved' : updated[existingIndex].status || 'approved'
-        };
-        setSessionUser(updated[existingIndex]);
+        updated[idx] = { ...updated[idx], block: profile.block, role: profile.role, status: profile.status };
         return updated;
-      } else {
-        const newProfile = {
-          id: authUser.id || 'usr_' + Date.now(),
-          email: authUser.email,
-          name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
-          role: isAdminUser ? 'admin' : 'resident',
-          status: isAdminUser ? 'approved' : 'pending',
-          course: 'MBBS',
-          batch: '2023',
-          roll_no: '',
-          block: 'Office Block',
-          room_no: 'Unassigned',
-          phone: '',
-          father_name: '',
-          address: '',
-          joining_date: new Date().toISOString().split('T')[0],
-          fee_status: 'Pending',
-          fee_ledger: [],
-          history: []
-        };
-        setSessionUser(newProfile);
-        return [...prev, newProfile];
       }
+      return [...prev, profile];
     });
   };
 
@@ -435,44 +520,48 @@ export default function App() {
     setAuthLoading(true);
 
     const userEmail = loginEmail.toLowerCase();
-    const isAdminUser = ADMIN_EMAILS.includes(userEmail) || userEmail.includes('admin');
+    const isAdminUser = ADMIN_EMAILS.includes(userEmail);
 
     if (!supabase) {
+      const existing = studentsRef.current.find(s => s.email?.toLowerCase() === userEmail);
+      let profile;
+      if (existing) {
+        profile = {
+          ...existing,
+          block: normalizeBlockName(existing.block),
+          role: isAdminUser ? 'admin' : existing.role,
+          status: 'approved'
+        };
+      } else {
+        profile = {
+          id: 'usr_' + Date.now(),
+          email: loginEmail,
+          name: loginEmail.split('@')[0],
+          role: isAdminUser ? 'admin' : 'resident',
+          status: 'approved',
+          course: 'MBBS',
+          batch: '2023',
+          roll_no: '',
+          block: 'Office Block',
+          room_no: 'Unassigned',
+          phone: '',
+          father_name: '',
+          address: '',
+          joining_date: new Date().toISOString().split('T')[0],
+          fee_status: 'Paid',
+          fee_ledger: [],
+          history: []
+        };
+      }
+      setSessionUser(profile);
       setStudents(prev => {
-        const existingIndex = prev.findIndex(s => s.email?.toLowerCase() === userEmail);
-        if (existingIndex !== -1) {
+        const idx = prev.findIndex(s => s.email?.toLowerCase() === userEmail);
+        if (idx !== -1) {
           const updated = [...prev];
-          updated[existingIndex] = {
-            ...updated[existingIndex],
-            block: normalizeBlockName(updated[existingIndex].block),
-            role: isAdminUser ? 'admin' : updated[existingIndex].role,
-            status: 'approved'
-          };
-          setSessionUser(updated[existingIndex]);
+          updated[idx] = profile;
           return updated;
-        } else {
-          const newProfile = {
-            id: 'usr_' + Date.now(),
-            email: loginEmail,
-            name: loginEmail.split('@')[0],
-            role: isAdminUser ? 'admin' : 'resident',
-            status: 'approved',
-            course: 'MBBS',
-            batch: '2023',
-            roll_no: '',
-            block: 'Office Block',
-            room_no: 'Unassigned',
-            phone: '',
-            father_name: '',
-            address: '',
-            joining_date: new Date().toISOString().split('T')[0],
-            fee_status: 'Paid',
-            fee_ledger: [],
-            history: []
-          };
-          setSessionUser(newProfile);
-          return [...prev, newProfile];
         }
+        return [...prev, profile];
       });
       setAuthLoading(false);
       return;
@@ -515,14 +604,11 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        let text = event.target.result;
-        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-        text = text.replace(/:\s*NaN\b/g, ': null');
-        const rawData = JSON.parse(text);
+        const rawData = JSON.parse(sanitizeJSONText(event.target.result));
         parseAndApplyJSON(rawData, true);
       } catch (err) {
         console.error("JSON Read Error:", err);
-        alert("Error parsing JSON file. Please ensure it is a valid JSON document.");
+        alert("Error parsing JSON file: " + err.message);
       }
     };
     reader.readAsText(file);
@@ -577,7 +663,7 @@ export default function App() {
   // Master Directory Filters
   const filteredStudents = useMemo(() => {
     return approvedStudents.filter(s => {
-      const roomVal = s.room_no || s.roomNo || '';
+      const roomVal = String(s.room_no || s.roomNo || '');
       const normBlock = normalizeBlockName(s.block);
 
       const matchesSearch = (s.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -905,7 +991,7 @@ export default function App() {
       <input 
         type="file" 
         ref={fileInputRef} 
-        accept=".json" 
+        accept=".json,application/json" 
         onChange={handleImportJSON} 
         className="hidden" 
       />
@@ -1387,6 +1473,8 @@ export default function App() {
                     <option value="2022">2022</option>
                     <option value="2023">2023</option>
                     <option value="2024">2024</option>
+                    <option value="2025">2025</option>
+                    <option value="2026">2026</option>
                   </select>
                 </div>
 
