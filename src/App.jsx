@@ -73,13 +73,6 @@ const isOccupantKey = (key) => {
   );
 };
 
-const formatShortName = (fullName) => {
-  if (!fullName) return '';
-  const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0];
-  return `${parts[0]} ${parts[1][0]}.`;
-};
-
 export default function App() {
   // Configuration State
   const [config, setConfig] = useState(() => {
@@ -179,8 +172,8 @@ export default function App() {
   const [feeFormData, setFeeFormData] = useState({
     year: '2026-27',
     amount: 45000,
-    paid: 45000,
-    status: 'Paid',
+    paid: 0,
+    status: 'Pending',
     date: new Date().toISOString().split('T')[0],
     notes: ''
   });
@@ -249,10 +242,9 @@ export default function App() {
 
   // --- PWA SUPPORT: MANIFEST & SERVICE WORKER INJECTION ---
   useEffect(() => {
-    // Inject Dynamic Manifest
     const manifestObj = {
       name: "OBH Hostel Portal",
-      short_name: "SUSHRUTA HOSTEL",
+      short_name: "OBH Portal",
       description: "Hostel Management System for Resident Allotment, Notices & Complaints",
       start_url: "/",
       display: "standalone",
@@ -281,7 +273,6 @@ export default function App() {
     }
     manifestLink.href = manifestStr;
 
-    // Listen for PWA install prompt
     const handleBeforeInstall = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -293,7 +284,6 @@ export default function App() {
       setDeferredPrompt(null);
     });
 
-    // Simple Service Worker inline registration for PWA offline shell capability
     if ('serviceWorker' in navigator) {
       const swCode = `
         const CACHE_NAME = 'obh-portal-v1';
@@ -304,7 +294,6 @@ export default function App() {
           e.waitUntil(clients.claim());
         });
         self.addEventListener('fetch', (e) => {
-          // Pass-through standard fetch
           e.respondWith(fetch(e.request).catch(() => new Response('Offline')));
         });
       `;
@@ -427,21 +416,10 @@ export default function App() {
             father_name: item.father_name || item.fatherName || '',
             address: item.address || '',
             joining_date: item.joining_date || today,
-            fee_status: item.fee_status || 'Paid',
+            fee_status: item.fee_status || 'Pending',
             status: item.status || 'approved',
             role: item.role || 'resident',
-            fee_ledger: item.fee_ledger || [
-              {
-                year: '2026-27',
-                block: matchedBlock,
-                room_no: roomNoVal,
-                amount: 45000,
-                paid: 45000,
-                status: 'Paid',
-                date: today,
-                notes: 'Imported Initial Deposit'
-              }
-            ],
+            fee_ledger: item.fee_ledger || [],
             history: item.history || [
               {
                 oldRoom: 'None',
@@ -661,7 +639,7 @@ export default function App() {
           father_name: '',
           address: '',
           joining_date: new Date().toISOString().split('T')[0],
-          fee_status: 'Paid',
+          fee_status: 'Pending',
           fee_ledger: [],
           history: []
         };
@@ -728,7 +706,6 @@ export default function App() {
     e.target.value = '';
   };
 
-  // --- FEATURE 4: CUSTOM APP LOGO HANDLER ---
   const handleLogoUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -844,7 +821,7 @@ export default function App() {
     return count;
   }, [filterBlock, filterBatch, filterCourse, filterFeeStatus, searchQuery]);
 
-  // --- FEATURE 1: FEE LEDGER CALCULATIONS ---
+  // FEE LEDGER CALCULATIONS
   const feeSummary = useMemo(() => {
     if (!selectedStudent || !selectedStudent.fee_ledger) {
       return { totalDue: 0, totalPaid: 0, balance: 0 };
@@ -858,7 +835,7 @@ export default function App() {
     };
   }, [selectedStudent]);
 
-  // --- FEATURE 1: FEE LEDGER EDIT HANDLERS ---
+  // FEE LEDGER EDIT HANDLERS
   const handleSaveFeeEntry = (e) => {
     e.preventDefault();
     if (!selectedStudent) return;
@@ -883,7 +860,6 @@ export default function App() {
       updatedLedger[editingFeeEntry] = entryToSave;
     }
 
-    // Determine latest overall fee status
     let overallFeeStatus = 'Paid';
     const totalDue = updatedLedger.reduce((s, i) => s + Number(i.amount || 0), 0);
     const totalPaid = updatedLedger.reduce((s, i) => s + Number(i.paid || 0), 0);
@@ -925,7 +901,7 @@ export default function App() {
     }
   };
 
-  // --- FEATURE 5: DELETE RESIDENT HANDLER ---
+  // DELETE RESIDENT HANDLER
   const handleDeleteResident = (studentToDelete) => {
     if (!studentToDelete) return;
     if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
@@ -1027,18 +1003,8 @@ export default function App() {
         ...updatedRecord,
         id: 'std_' + Date.now(),
         status: 'approved',
-        fee_ledger: [
-          {
-            year: '2026-27',
-            block: normBlock,
-            room_no: updatedRecord.room_no,
-            amount: 45000,
-            paid: updatedRecord.fee_status === 'Paid' ? 45000 : 0,
-            status: updatedRecord.fee_status || 'Pending',
-            date: updatedRecord.joining_date,
-            notes: 'Initial Registration Deposit'
-          }
-        ],
+        fee_status: updatedRecord.fee_status || 'Pending',
+        fee_ledger: [],
         history: [{
           oldRoom: 'None',
           oldBlock: 'None',
@@ -1086,23 +1052,11 @@ export default function App() {
       reason: transferData.reason || 'Room Shift'
     };
 
-    const newYearFee = {
-      year: transferData.academicYear,
-      block: targetBlock,
-      room_no: transferData.targetRoom,
-      amount: 45000,
-      paid: 0,
-      status: 'Pending',
-      date: transferData.transferDate,
-      notes: `Shifted to Rm ${transferData.targetRoom} (${targetBlock})`
-    };
-
     const updatedStudent = {
       ...student,
       room_no: transferData.targetRoom,
       block: targetBlock,
       joining_date: transferData.transferDate,
-      fee_ledger: [newYearFee, ...(student.fee_ledger || [])],
       history: [historyRecord, ...(student.history || [])]
     };
 
@@ -1339,13 +1293,12 @@ export default function App() {
             <AppLogoIcon className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="font-extrabold text-sm leading-tight">SUSHRUTA HOSTEL</h1>
+            <h1 className="font-extrabold text-sm leading-tight">OBH PORTAL</h1>
             <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider">{getTabTitle(activeTab)}</p>
           </div>
         </div>
 
         <div className="flex items-center space-x-1">
-          {/* FEATURE 3: PWA INSTALL BUTTON */}
           {deferredPrompt && (
             <button
               onClick={handleInstallApp}
@@ -1391,7 +1344,7 @@ export default function App() {
                 <AppLogoIcon className="w-5 h-5" />
               </div>
               <div>
-                <h1 className="font-extrabold text-base leading-tight tracking-wide">SUSHRUTA HOSTEL</h1>
+                <h1 className="font-extrabold text-base leading-tight tracking-wide">OBH PORTAL</h1>
                 <p className="text-[10px] text-indigo-500 font-bold tracking-widest uppercase">Hostel Management</p>
               </div>
             </div>
@@ -1400,7 +1353,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* FEATURE 3: DESKTOP PWA INSTALL BANNER */}
           {deferredPrompt && (
             <div className="m-3 p-3 rounded-xl bg-indigo-600 text-white text-xs space-y-1.5 shadow-md">
               <div className="flex items-center space-x-2 font-bold">
@@ -1473,7 +1425,6 @@ export default function App() {
               <span>Complaints Desk</span>
             </button>
 
-            {/* FEATURE 2: HOSTEL MAP TAB FOR ALL USERS */}
             <button
               onClick={() => setActiveTab('map')}
               className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'map' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
@@ -1522,7 +1473,7 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MOBILE FIXED BOTTOM TAB BAR (Includes Map Tab) */}
+      {/* MOBILE FIXED BOTTOM TAB BAR */}
       <nav className={`md:hidden fixed bottom-0 left-0 right-0 z-40 ${darkMode ? 'bg-slate-950/95 border-slate-800' : 'bg-white/95 border-slate-200'} backdrop-blur-md border-t flex justify-around items-center py-2 px-1 shadow-lg`}>
         <button
           onClick={() => setActiveTab('dashboard')}
@@ -1554,7 +1505,6 @@ export default function App() {
           <span className="text-[9px] mt-1 font-medium">Directory</span>
         </button>
 
-        {/* FEATURE 2: HOSTEL MAP IN MOBILE TAB */}
         <button
           onClick={() => setActiveTab('map')}
           className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${activeTab === 'map' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
@@ -1688,7 +1638,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: ROOM GRID & VACANCY DASHBOARD */}
+        {/* VIEW 2: IMPROVED ROOM GRID & VACANCY DASHBOARD */}
         {activeTab === 'grid' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
           <div className="p-4 sm:p-6 space-y-5">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1712,7 +1662,7 @@ export default function App() {
                     onClick={() => {
                       setEditingStudent({ 
                         name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Block', room_no: '', 
-                        phone: '', father_name: '', address: '', joining_date: new Date().toISOString().split('T')[0], fee_status: 'Paid' 
+                        phone: '', father_name: '', address: '', joining_date: new Date().toISOString().split('T')[0], fee_status: 'Pending' 
                       });
                       setIsEditStudentModalOpen(true);
                     }}
@@ -1867,7 +1817,7 @@ export default function App() {
                       </div>
 
                       {blockRooms.length > 0 ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 pt-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pt-2">
                           {blockRooms.map(rm => {
                             const occupants = approvedStudents.filter(s => 
                               normalizeBlockName(s.block) === blockName && 
@@ -1882,7 +1832,7 @@ export default function App() {
                               <div
                                 key={rm.id}
                                 onClick={() => setSelectedRoom({ ...rm, occupants })}
-                                className={`p-3 rounded-xl border transition-all cursor-pointer hover:border-indigo-500 hover:scale-[1.02] active:scale-[0.98] flex flex-col justify-between ${
+                                className={`p-3.5 rounded-2xl border transition-all cursor-pointer hover:border-indigo-500 hover:shadow-md flex flex-col justify-between ${
                                   isFull 
                                     ? 'bg-rose-50/70 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50' 
                                     : isEmpty 
@@ -1891,37 +1841,68 @@ export default function App() {
                                 }`}
                               >
                                 <div>
-                                  <div className="flex justify-between items-start">
-                                    <span className="font-black text-xs text-indigo-600 dark:text-indigo-400">Rm {rm.room_no}</span>
-                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-900/80 border shadow-2xs">
-                                      {rm.seater}S
+                                  {/* PROMINENT ROOM NUMBER BADGE & CAPACITY */}
+                                  <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-black/5 dark:border-white/5">
+                                    <span className="px-2.5 py-1 rounded-xl bg-indigo-600 text-white font-black text-xs shadow-xs tracking-tight">
+                                      Room {rm.room_no}
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-lg bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-[10px] border border-slate-300/50 dark:border-slate-700/50">
+                                      {rm.seater} Seater
                                     </span>
                                   </div>
 
-                                  <div className="mt-1.5 text-xs">
+                                  {/* ALL OCCUPANTS LISTED INDIVIDUALLY & TAPPABLE */}
+                                  <div className="my-2.5 space-y-1.5 min-h-[48px]">
                                     {occupants.length > 0 ? (
-                                      <p className="font-bold text-[11px] truncate">{formatShortName(occupants[0].name)}</p>
+                                      <div className="space-y-1.5">
+                                        {occupants.map(std => (
+                                          <button
+                                            key={std.id}
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSelectedStudent(std);
+                                              setProfileModalTab('details');
+                                            }}
+                                            className="w-full text-left px-2.5 py-1.5 rounded-xl bg-white/90 dark:bg-slate-900/90 hover:bg-indigo-50 dark:hover:bg-indigo-950/70 border border-slate-200/80 dark:border-slate-800 transition-colors flex items-center justify-between group shadow-2xs"
+                                          >
+                                            <div className="truncate pr-1">
+                                              <p className="font-bold text-[11px] text-slate-800 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 truncate">
+                                                {std.name}
+                                              </p>
+                                              <p className="text-[9px] text-slate-400 font-medium">
+                                                {std.course} • Batch {std.batch}
+                                              </p>
+                                            </div>
+                                            <ChevronRight className="w-3 h-3 text-slate-400 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+                                          </button>
+                                        ))}
+                                      </div>
                                     ) : (
-                                      <p className="font-bold text-[11px] text-emerald-600 dark:text-emerald-400">Vacant</p>
-                                    )}
-                                    {occupants.length > 1 && (
-                                      <p className="text-[9px] text-slate-400 font-medium">+ {occupants.length - 1} more</p>
+                                      <div className="py-3 text-center bg-emerald-100/60 dark:bg-emerald-950/40 rounded-xl border border-emerald-200/60 dark:border-emerald-900/40">
+                                        <p className="font-bold text-xs text-emerald-700 dark:text-emerald-400">Vacant Room</p>
+                                        <p className="text-[10px] text-emerald-600/80 dark:text-emerald-500/80">Available for allotment</p>
+                                      </div>
                                     )}
                                   </div>
                                 </div>
 
-                                <div className="mt-2 space-y-1">
-                                  <div className="w-full bg-black/10 dark:bg-white/10 h-1 rounded-full overflow-hidden">
+                                {/* CARD FOOTER WITH PROGRESS BAR */}
+                                <div className="mt-2 pt-2 border-t border-black/5 dark:border-white/5 space-y-1.5">
+                                  <div className="w-full bg-black/10 dark:bg-white/10 h-1.5 rounded-full overflow-hidden">
                                     <div 
-                                      className={`h-full rounded-full ${isFull ? 'bg-rose-500' : isEmpty ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                      className={`h-full rounded-full transition-all duration-300 ${isFull ? 'bg-rose-500' : isEmpty ? 'bg-emerald-500' : 'bg-amber-500'}`}
                                       style={{ width: `${fillPercent}%` }}
                                     />
                                   </div>
-                                  <div className="flex justify-between items-center text-[9px] font-bold">
+                                  <div className="flex justify-between items-center text-[10px] font-bold">
                                     <span className={isFull ? 'text-rose-600 dark:text-rose-400' : isEmpty ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
-                                      {occupants.length}/{capacity} Occupied
+                                      {occupants.length}/{capacity} Beds Occupied
                                     </span>
-                                    <Eye className="w-3 h-3 text-slate-400" />
+                                    <span className="text-[10px] text-indigo-500 hover:underline flex items-center space-x-0.5 font-bold">
+                                      <span>Inspect</span>
+                                      <Eye className="w-3 h-3" />
+                                    </span>
                                   </div>
                                 </div>
                               </div>
@@ -1969,7 +1950,7 @@ export default function App() {
                     onClick={() => {
                       setEditingStudent({ 
                         name: '', roll_no: '', course: 'MBBS', batch: '2023', block: 'Office Block', room_no: '', 
-                        phone: '', father_name: '', address: '', joining_date: new Date().toISOString().split('T')[0], fee_status: 'Paid' 
+                        phone: '', father_name: '', address: '', joining_date: new Date().toISOString().split('T')[0], fee_status: 'Pending' 
                       });
                       setIsEditStudentModalOpen(true);
                     }}
@@ -2103,7 +2084,6 @@ export default function App() {
                           <span className="text-slate-400 text-[11px]">No Phone</span>
                         )}
 
-                        {/* FEATURE 5: DIRECT DELETE ON MOBILE CARD FOR ADMIN */}
                         {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
                           <button
                             onClick={(e) => {
@@ -2179,7 +2159,6 @@ export default function App() {
                               <Edit className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                             </button>
                           )}
-                          {/* FEATURE 5: DELETE BUTTON ON DESKTOP TABLE */}
                           {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
                             <button onClick={() => handleDeleteResident(std)} className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-950/50 rounded text-rose-600 dark:text-rose-400" title="Delete Resident">
                               <Trash2 className="w-3.5 h-3.5" />
@@ -2380,7 +2359,7 @@ export default function App() {
           </div>
         )}
 
-        {/* FEATURE 2: HOSTEL MAP VIEW (ENHANCED RESTORED) */}
+        {/* HOSTEL MAP VIEW */}
         {activeTab === 'map' && (
           <div className="p-4 sm:p-6 space-y-4 max-w-5xl mx-auto w-full">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -2464,7 +2443,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 7: APPROVAL DESK */}
+        {/* APPROVAL DESK */}
         {activeTab === 'approval' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
           <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4 w-full">
             <div className="flex justify-between items-center">
@@ -2512,7 +2491,7 @@ export default function App() {
 
       </main>
 
-      {/* --- MODALS & BOTTOM SHEETS --- */}
+      {/* MODALS */}
 
       {/* LINK TO EXISTING RESIDENT MODAL */}
       {isLinkModalOpen && linkingPendingUser && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
@@ -2635,7 +2614,6 @@ export default function App() {
             </div>
 
             <div className="space-y-2.5 pt-1">
-              {/* FEATURE 4: CUSTOM LOGO CONTROL */}
               <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="font-bold text-xs text-slate-600 dark:text-slate-300">Custom App Logo</span>
@@ -2916,7 +2894,7 @@ export default function App() {
         </div>
       )}
 
-      {/* RESIDENT PROFILE MODAL WITH ENHANCED FEE LEDGER & DELETE RESIDENT */}
+      {/* RESIDENT PROFILE MODAL */}
       {selectedStudent && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className={`w-full max-w-2xl rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-5 shadow-2xl my-8 max-h-[90vh] overflow-y-auto`}>
@@ -2980,7 +2958,7 @@ export default function App() {
               </div>
             )}
 
-            {/* FEATURE 1: IMPROVED FEE LEDGER WITH EDIT MODE & FINANCIAL SUMMARY */}
+            {/* FEE LEDGER */}
             {profileModalTab === 'fee' && (
               <div className="space-y-4 text-xs">
                 
@@ -3009,8 +2987,8 @@ export default function App() {
                         setFeeFormData({
                           year: '2026-27',
                           amount: 45000,
-                          paid: 45000,
-                          status: 'Paid',
+                          paid: 0,
+                          status: 'Pending',
                           date: new Date().toISOString().split('T')[0],
                           notes: ''
                         });
@@ -3184,7 +3162,7 @@ export default function App() {
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="6" className="p-4 text-center text-slate-400 italic">No fee ledger recorded yet.</td>
+                          <td colSpan="6" className="p-4 text-center text-slate-400 italic">No fee ledger recorded yet. Click "Add Fee Entry" above to record payments.</td>
                         </tr>
                       )}
                     </tbody>
@@ -3211,10 +3189,9 @@ export default function App() {
               </div>
             )}
 
-            {/* ACTION BAR IN PROFILE MODAL (WITH DISTINCT DELETE RESIDENT BUTTON) */}
+            {/* ACTION BAR IN PROFILE MODAL */}
             {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-2">
-                {/* FEATURE 5: DELETE RESIDENT BUTTON */}
                 <button
                   onClick={() => handleDeleteResident(selectedStudent)}
                   className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition active:scale-95"
@@ -3645,7 +3622,7 @@ export default function App() {
               <div>
                 <label className="font-bold block mb-1 text-slate-500">Fee Status</label>
                 <select
-                  value={editingStudent.fee_status || 'Paid'}
+                  value={editingStudent.fee_status || 'Pending'}
                   onChange={e => setEditingStudent({ ...editingStudent, fee_status: e.target.value })}
                   className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                 >
