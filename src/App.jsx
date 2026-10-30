@@ -7,19 +7,20 @@ import {
   Upload, Database, Copy, Settings, LogOut, Lock, Mail,
   Map as MapIcon, Image as ImageIcon, Trash2, Calendar, CreditCard, Phone, User, FileText, CheckCircle, AlertCircle,
   Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson, Download, RefreshCw,
-  ChevronDown, ChevronUp, SlidersHorizontal, Info, MoreVertical, Link2
+  ChevronDown, ChevronUp, SlidersHorizontal, Info, MoreVertical, Link2, Smartphone, Save, ZoomIn, ZoomOut, RotateCcw
 } from 'lucide-react';
 
 // --- DEFAULT CONFIGURATION ---
 const DEFAULT_CONFIG = {
   supabaseUrl: 'https://fojauvqvrqarxtwyrmtg.supabase.co',
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvamF1dnF2cnFhcnh0d3lybXRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4NjczMDcsImV4cCI6MjEwODQ0MzMwN30.X9nNRtP2Q2AteCZXRYWPmADReq7Y5u9rxq5UortTtXA',
+  appLogo: '', // Custom logo (base64 or URL)
 };
 
 const HOSTEL_BLOCKS = ['NCC Block', 'Office Block', 'Mathura (North)', 'Mathura (South)', 'Tennis Block', 'PG Block'];
 const ADMIN_EMAILS = ['dr.ankitraj8558@gmail.com', 'ankit.raj@hostel.edu'];
 
-// Files are served from the project's public/ folder (public/data/... -> /data/...)
+// Files are served from the project's public/ folder
 const REGISTER_PATHS = ['/data/OBH_ROOM_REGISTER.json', '/OBH_ROOM_REGISTER.json'];
 
 // Words in occupant cells that are NOT residents
@@ -46,7 +47,6 @@ const sanitizeJSONText = (text) => {
   return t.replace(/([:\[,]\s*)-?(NaN|Infinity)(?=\s*[,}\]])/g, '$1null');
 };
 
-// Find a value in a row by flexible column name
 const normKey = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
 const pickField = (item, names) => {
   for (const key of Object.keys(item)) {
@@ -73,7 +73,6 @@ const isOccupantKey = (key) => {
   );
 };
 
-// Format occupant short name for compact display
 const formatShortName = (fullName) => {
   if (!fullName) return '';
   const parts = fullName.trim().split(/\s+/);
@@ -88,6 +87,10 @@ export default function App() {
     return saved ? JSON.parse(saved) : DEFAULT_CONFIG;
   });
 
+  useEffect(() => {
+    localStorage.setItem('obh_app_config', JSON.stringify(config));
+  }, [config]);
+
   // Supabase Client
   const supabase = useMemo(() => {
     if (config.supabaseUrl && config.supabaseAnonKey) {
@@ -101,8 +104,9 @@ export default function App() {
     return null;
   }, [config.supabaseUrl, config.supabaseAnonKey]);
 
-  // Hidden File Input Ref for Manual JSON Upload
+  // Hidden File Input Ref for Manual JSON Upload & Logo Upload
   const fileInputRef = useRef(null);
+  const logoInputRef = useRef(null);
 
   // Auth State
   const [sessionUser, setSessionUser] = useState(null);
@@ -120,7 +124,11 @@ export default function App() {
   const [isAdminToolsOpen, setIsAdminToolsOpen] = useState(false);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
-  // DATA STORES WITH BLOCK NORMALIZATION MIGRATION
+  // PWA Deferred Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  // DATA STORES
   const [students, setStudents] = useState(() => {
     const saved = localStorage.getItem('obh_db_students_v3');
     if (!saved) return [];
@@ -143,7 +151,6 @@ export default function App() {
     }
   });
 
-  // Always-current copy of students
   const studentsRef = useRef(students);
   studentsRef.current = students;
 
@@ -158,6 +165,7 @@ export default function App() {
   });
 
   const [hostelMapUrl, setHostelMapUrl] = useState(() => localStorage.getItem('obh_hostel_map_v3') || '');
+  const [mapZoomLevel, setMapZoomLevel] = useState(1);
 
   // Modal Control States
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -165,6 +173,17 @@ export default function App() {
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [isEditStudentModalOpen, setIsEditStudentModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
+
+  // Fee Ledger Editing State
+  const [editingFeeEntry, setEditingFeeEntry] = useState(null); // null or index or 'new'
+  const [feeFormData, setFeeFormData] = useState({
+    year: '2026-27',
+    amount: 45000,
+    paid: 45000,
+    status: 'Paid',
+    date: new Date().toISOString().split('T')[0],
+    notes: ''
+  });
 
   // Room Configuration Modal State
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
@@ -184,7 +203,7 @@ export default function App() {
     reason: '' 
   });
 
-  // Link Pending Resident to Existing Profile Modal State
+  // Link Pending Resident State
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
   const [linkingPendingUser, setLinkingPendingUser] = useState(null);
   const [linkSearchQuery, setLinkSearchQuery] = useState('');
@@ -205,9 +224,9 @@ export default function App() {
   const [filterCourse, setFilterCourse] = useState('ALL');
   const [filterFeeStatus, setFilterFeeStatus] = useState('ALL');
 
-  // Rooms View Specific Filters & Controls
-  const [roomFilterStatus, setRoomFilterStatus] = useState('ALL'); // ALL, VACANT, PARTIAL, FULL
-  const [roomSortOption, setRoomSortOption] = useState('ROOM_NO'); // ROOM_NO, OCCUPANCY
+  // Rooms View Filters
+  const [roomFilterStatus, setRoomFilterStatus] = useState('ALL');
+  const [roomSortOption, setRoomSortOption] = useState('ROOM_NO');
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
   const [collapsedBlocks, setCollapsedBlocks] = useState({});
 
@@ -226,8 +245,88 @@ export default function App() {
     if (rooms.length === 0) {
       loadJSONFromRepo(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // --- PWA SUPPORT: MANIFEST & SERVICE WORKER INJECTION ---
+  useEffect(() => {
+    // Inject Dynamic Manifest
+    const manifestObj = {
+      name: "OBH Hostel Portal",
+      short_name: "OBH Portal",
+      description: "Hostel Management System for Resident Allotment, Notices & Complaints",
+      start_url: "/",
+      display: "standalone",
+      background_color: "#0f172a",
+      theme_color: "#4f46e5",
+      icons: [
+        {
+          src: config.appLogo || "https://cdn-icons-png.flaticon.com/512/2858/2858022.png",
+          sizes: "192x192",
+          type: "image/png"
+        },
+        {
+          src: config.appLogo || "https://cdn-icons-png.flaticon.com/512/2858/2858022.png",
+          sizes: "512x512",
+          type: "image/png"
+        }
+      ]
+    };
+
+    const manifestStr = URL.createObjectURL(new Blob([JSON.stringify(manifestObj)], { type: 'application/json' }));
+    let manifestLink = document.querySelector('link[rel="manifest"]');
+    if (!manifestLink) {
+      manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      document.head.appendChild(manifestLink);
+    }
+    manifestLink.href = manifestStr;
+
+    // Listen for PWA install prompt
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    });
+
+    // Simple Service Worker inline registration for PWA offline shell capability
+    if ('serviceWorker' in navigator) {
+      const swCode = `
+        const CACHE_NAME = 'obh-portal-v1';
+        self.addEventListener('install', (e) => {
+          self.skipWaiting();
+        });
+        self.addEventListener('activate', (e) => {
+          e.waitUntil(clients.claim());
+        });
+        self.addEventListener('fetch', (e) => {
+          // Pass-through standard fetch
+          e.respondWith(fetch(e.request).catch(() => new Response('Offline')));
+        });
+      `;
+      const swBlob = new Blob([swCode], { type: 'text/javascript' });
+      const swUrl = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swUrl).catch(err => console.log('SW Registration skipped:', err));
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    };
+  }, [config.appLogo]);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setIsInstalled(true);
+    }
+    setDeferredPrompt(null);
+  };
 
   // Shared Data Parser
   const parseAndApplyJSON = (rawData, showPrompt = true) => {
@@ -339,7 +438,8 @@ export default function App() {
                 amount: 45000,
                 paid: 45000,
                 status: 'Paid',
-                date: today
+                date: today,
+                notes: 'Imported Initial Deposit'
               }
             ],
             history: item.history || [
@@ -390,7 +490,6 @@ export default function App() {
     return true;
   };
 
-  // Fetch register from repository
   const loadJSONFromRepo = async (showPrompt = true) => {
     setIsFetchingJson(true);
     const errors = [];
@@ -423,7 +522,6 @@ export default function App() {
         break;
       } catch (e) {
         errors.push(`${path} -> ${e.message}`);
-        console.warn(`Could not fetch from ${path}`, e);
       }
     }
 
@@ -438,7 +536,6 @@ export default function App() {
     }
   };
 
-  // Export room register
   const handleExportJSON = () => {
     const exportData = rooms.map(rm => {
       const occupants = students.filter(s => normalizeBlockName(s.block) === normalizeBlockName(rm.block) && s.room_no === rm.room_no);
@@ -480,7 +577,6 @@ export default function App() {
     });
 
     return () => subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
   const syncUserProfile = (authUser) => {
@@ -625,11 +721,25 @@ export default function App() {
         const rawData = JSON.parse(sanitizeJSONText(event.target.result));
         parseAndApplyJSON(rawData, true);
       } catch (err) {
-        console.error("JSON Read Error:", err);
         alert("Error parsing JSON file: " + err.message);
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // --- FEATURE 4: CUSTOM APP LOGO HANDLER ---
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Logo = event.target.result;
+      setConfig(prev => ({ ...prev, appLogo: base64Logo }));
+      alert("App Logo updated successfully!");
+    };
+    reader.readAsDataURL(file);
     e.target.value = '';
   };
 
@@ -678,7 +788,6 @@ export default function App() {
     };
   }, [rooms, approvedStudents]);
 
-  // Total matching rooms count across all blocks when searching on Rooms page
   const totalMatchingRooms = useMemo(() => {
     if (!roomSearchQuery.trim()) return null;
     const q = roomSearchQuery.toLowerCase();
@@ -734,6 +843,103 @@ export default function App() {
     if (searchQuery.trim() !== '') count++;
     return count;
   }, [filterBlock, filterBatch, filterCourse, filterFeeStatus, searchQuery]);
+
+  // --- FEATURE 1: FEE LEDGER CALCULATIONS ---
+  const feeSummary = useMemo(() => {
+    if (!selectedStudent || !selectedStudent.fee_ledger) {
+      return { totalDue: 0, totalPaid: 0, balance: 0 };
+    }
+    const totalDue = selectedStudent.fee_ledger.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    const totalPaid = selectedStudent.fee_ledger.reduce((sum, item) => sum + (Number(item.paid) || 0), 0);
+    return {
+      totalDue,
+      totalPaid,
+      balance: Math.max(0, totalDue - totalPaid)
+    };
+  }, [selectedStudent]);
+
+  // --- FEATURE 1: FEE LEDGER EDIT HANDLERS ---
+  const handleSaveFeeEntry = (e) => {
+    e.preventDefault();
+    if (!selectedStudent) return;
+    if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
+
+    const entryToSave = {
+      year: feeFormData.year.trim() || '2026-27',
+      block: selectedStudent.block,
+      room_no: selectedStudent.room_no || 'Unassigned',
+      amount: Number(feeFormData.amount) || 0,
+      paid: Number(feeFormData.paid) || 0,
+      status: feeFormData.status,
+      date: feeFormData.date || new Date().toISOString().split('T')[0],
+      notes: feeFormData.notes || ''
+    };
+
+    let updatedLedger = [...(selectedStudent.fee_ledger || [])];
+
+    if (editingFeeEntry === 'new') {
+      updatedLedger.unshift(entryToSave);
+    } else if (typeof editingFeeEntry === 'number') {
+      updatedLedger[editingFeeEntry] = entryToSave;
+    }
+
+    // Determine latest overall fee status
+    let overallFeeStatus = 'Paid';
+    const totalDue = updatedLedger.reduce((s, i) => s + Number(i.amount || 0), 0);
+    const totalPaid = updatedLedger.reduce((s, i) => s + Number(i.paid || 0), 0);
+    if (totalPaid === 0 && totalDue > 0) overallFeeStatus = 'Pending';
+    else if (totalPaid < totalDue) overallFeeStatus = 'Partial';
+
+    const updatedStudent = {
+      ...selectedStudent,
+      fee_status: overallFeeStatus,
+      fee_ledger: updatedLedger
+    };
+
+    setStudents(prev => prev.map(s => s.id === selectedStudent.id ? updatedStudent : s));
+    setSelectedStudent(updatedStudent);
+    setEditingFeeEntry(null);
+  };
+
+  const handleDeleteFeeEntry = (index) => {
+    if (!selectedStudent) return;
+    if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
+
+    if (window.confirm("Are you sure you want to delete this fee ledger entry?")) {
+      const updatedLedger = selectedStudent.fee_ledger.filter((_, idx) => idx !== index);
+      
+      let overallFeeStatus = 'Paid';
+      const totalDue = updatedLedger.reduce((s, i) => s + Number(i.amount || 0), 0);
+      const totalPaid = updatedLedger.reduce((s, i) => s + Number(i.paid || 0), 0);
+      if (totalPaid === 0 && totalDue > 0) overallFeeStatus = 'Pending';
+      else if (totalPaid < totalDue) overallFeeStatus = 'Partial';
+
+      const updatedStudent = {
+        ...selectedStudent,
+        fee_status: overallFeeStatus,
+        fee_ledger: updatedLedger
+      };
+
+      setStudents(prev => prev.map(s => s.id === selectedStudent.id ? updatedStudent : s));
+      setSelectedStudent(updatedStudent);
+    }
+  };
+
+  // --- FEATURE 5: DELETE RESIDENT HANDLER ---
+  const handleDeleteResident = (studentToDelete) => {
+    if (!studentToDelete) return;
+    if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
+
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete resident "${studentToDelete.name}"?\n\nThis action cannot be undone.`
+    );
+
+    if (confirmed) {
+      setStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
+      setSelectedStudent(null);
+      alert(`Resident "${studentToDelete.name}" has been permanently deleted.`);
+    }
+  };
 
   // Add Dynamic Room
   const handleAddRoom = (e) => {
@@ -796,7 +1002,7 @@ export default function App() {
   // Save Resident
   const handleSaveStudent = (e) => {
     e.preventDefault();
-    if (sessionUser?.role !== 'admin') return alert('Access Denied');
+    if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
 
     const normBlock = normalizeBlockName(editingStudent.block);
     const updatedRecord = { ...editingStudent, block: normBlock };
@@ -829,7 +1035,8 @@ export default function App() {
             amount: 45000,
             paid: updatedRecord.fee_status === 'Paid' ? 45000 : 0,
             status: updatedRecord.fee_status || 'Pending',
-            date: updatedRecord.joining_date
+            date: updatedRecord.joining_date,
+            notes: 'Initial Registration Deposit'
           }
         ],
         history: [{
@@ -887,7 +1094,7 @@ export default function App() {
       paid: 0,
       status: 'Pending',
       date: transferData.transferDate,
-      remarks: `Shifted to Rm ${transferData.targetRoom} (${targetBlock})`
+      notes: `Shifted to Rm ${transferData.targetRoom} (${targetBlock})`
     };
 
     const updatedStudent = {
@@ -904,7 +1111,7 @@ export default function App() {
     if (selectedStudent?.id === student.id) setSelectedStudent(updatedStudent);
   };
 
-  // Linking Pending User to Existing Resident Record
+  // Linking Pending User
   const handleConfirmLink = (pendingUser, existingResident) => {
     if (!pendingUser || !existingResident) return;
 
@@ -1003,14 +1210,22 @@ export default function App() {
     setCollapsedBlocks(prev => ({ ...prev, [blockName]: !prev[blockName] }));
   };
 
+  // App Logo Renderer Component
+  const AppLogoIcon = ({ className = "w-5 h-5" }) => {
+    if (config.appLogo) {
+      return <img src={config.appLogo} alt="App Logo" className={`${className} object-contain rounded`} />;
+    }
+    return <Building2 className={className} />;
+  };
+
   // --- LOGIN VIEW ---
   if (!sessionUser) {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4 font-sans">
         <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-3xl p-8 space-y-6 shadow-2xl">
           <div className="text-center space-y-2">
-            <div className="w-14 h-14 bg-indigo-600 text-white rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-600/30">
-              <Building2 className="w-7 h-7" />
+            <div className="w-16 h-16 bg-indigo-600 text-white rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-600/30 overflow-hidden p-1">
+              <AppLogoIcon className="w-9 h-9" />
             </div>
             <h1 className="text-2xl font-black tracking-tight mt-2">OBH HOSTEL PORTAL</h1>
             <p className="text-xs text-slate-400">Sign in to access resident status, notices, and hostel desk.</p>
@@ -1099,7 +1314,7 @@ export default function App() {
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col md:flex-row font-sans transition-colors duration-200 pb-20 md:pb-0`}>
       
-      {/* Hidden File Input for Import */}
+      {/* Hidden File Input for JSON Import */}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1108,11 +1323,20 @@ export default function App() {
         className="hidden" 
       />
 
+      {/* Hidden File Input for Custom App Logo */}
+      <input 
+        type="file" 
+        ref={logoInputRef} 
+        accept="image/*" 
+        onChange={handleLogoUpload} 
+        className="hidden" 
+      />
+
       {/* MOBILE STICKY TOP HEADER */}
       <header className={`md:hidden sticky top-0 z-40 ${darkMode ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'} backdrop-blur-md border-b px-4 py-3 flex items-center justify-between`}>
         <div className="flex items-center space-x-2.5">
-          <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md">
-            <Building2 className="w-4 h-4" />
+          <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md overflow-hidden">
+            <AppLogoIcon className="w-4 h-4" />
           </div>
           <div>
             <h1 className="font-extrabold text-sm leading-tight">OBH PORTAL</h1>
@@ -1121,6 +1345,17 @@ export default function App() {
         </div>
 
         <div className="flex items-center space-x-1">
+          {/* FEATURE 3: PWA INSTALL BUTTON */}
+          {deferredPrompt && (
+            <button
+              onClick={handleInstallApp}
+              className="px-2.5 py-1.5 rounded-xl bg-indigo-600 text-white text-[10px] font-bold shadow flex items-center space-x-1"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Install</span>
+            </button>
+          )}
+
           <button 
             onClick={() => setDarkMode(!darkMode)} 
             className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
@@ -1152,8 +1387,8 @@ export default function App() {
         <div>
           <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="bg-indigo-600 text-white p-2.5 rounded-xl shadow-md">
-                <Building2 className="w-5 h-5" />
+              <div className="bg-indigo-600 text-white p-2.5 rounded-xl shadow-md overflow-hidden">
+                <AppLogoIcon className="w-5 h-5" />
               </div>
               <div>
                 <h1 className="font-extrabold text-base leading-tight tracking-wide">OBH PORTAL</h1>
@@ -1164,6 +1399,23 @@ export default function App() {
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
           </div>
+
+          {/* FEATURE 3: DESKTOP PWA INSTALL BANNER */}
+          {deferredPrompt && (
+            <div className="m-3 p-3 rounded-xl bg-indigo-600 text-white text-xs space-y-1.5 shadow-md">
+              <div className="flex items-center space-x-2 font-bold">
+                <Smartphone className="w-4 h-4" />
+                <span>Install OBH App</span>
+              </div>
+              <p className="text-[11px] text-indigo-100">Add to home screen for quick offline access.</p>
+              <button
+                onClick={handleInstallApp}
+                className="w-full py-1.5 bg-white text-indigo-600 font-bold rounded-lg text-[11px] shadow hover:bg-indigo-50 transition"
+              >
+                Install Now
+              </button>
+            </div>
+          )}
 
           <div className="p-3 m-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 space-y-1">
             <div className="flex justify-between items-center">
@@ -1221,6 +1473,7 @@ export default function App() {
               <span>Complaints Desk</span>
             </button>
 
+            {/* FEATURE 2: HOSTEL MAP TAB FOR ALL USERS */}
             <button
               onClick={() => setActiveTab('map')}
               className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'map' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
@@ -1269,14 +1522,14 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MOBILE FIXED BOTTOM TAB BAR (5 Tabs) */}
+      {/* MOBILE FIXED BOTTOM TAB BAR (Includes Map Tab) */}
       <nav className={`md:hidden fixed bottom-0 left-0 right-0 z-40 ${darkMode ? 'bg-slate-950/95 border-slate-800' : 'bg-white/95 border-slate-200'} backdrop-blur-md border-t flex justify-around items-center py-2 px-1 shadow-lg`}>
         <button
           onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'dashboard' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${activeTab === 'dashboard' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
         >
-          <Building2 className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-medium">Overview</span>
+          <Building2 className="w-4 h-4" />
+          <span className="text-[9px] mt-1 font-medium">Overview</span>
         </button>
 
         <button
@@ -1284,10 +1537,10 @@ export default function App() {
             if (sessionUser.role === 'admin' || sessionUser.role === 'authorized') setActiveTab('grid');
             else alert('Access restricted to Authorized Personnel.');
           }}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'grid' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${activeTab === 'grid' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
         >
-          <BedDouble className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-medium">Rooms</span>
+          <BedDouble className="w-4 h-4" />
+          <span className="text-[9px] mt-1 font-medium">Rooms</span>
         </button>
 
         <button
@@ -1295,26 +1548,35 @@ export default function App() {
             if (sessionUser.role === 'admin' || sessionUser.role === 'authorized') setActiveTab('directory');
             else alert('Access restricted to Authorized Personnel.');
           }}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'directory' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${activeTab === 'directory' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
         >
-          <Users className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-medium">Directory</span>
+          <Users className="w-4 h-4" />
+          <span className="text-[9px] mt-1 font-medium">Directory</span>
+        </button>
+
+        {/* FEATURE 2: HOSTEL MAP IN MOBILE TAB */}
+        <button
+          onClick={() => setActiveTab('map')}
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${activeTab === 'map' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <MapIcon className="w-4 h-4" />
+          <span className="text-[9px] mt-1 font-medium">Map</span>
         </button>
 
         <button
           onClick={() => setActiveTab('notices')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'notices' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${activeTab === 'notices' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
         >
-          <Bell className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-medium">Notices</span>
+          <Bell className="w-4 h-4" />
+          <span className="text-[9px] mt-1 font-medium">Notices</span>
         </button>
 
         <button
           onClick={() => setActiveTab('tickets')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'tickets' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${activeTab === 'tickets' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
         >
-          <MessageSquare className="w-5 h-5" />
-          <span className="text-[10px] mt-1 font-medium">Complaints</span>
+          <MessageSquare className="w-4 h-4" />
+          <span className="text-[9px] mt-1 font-medium">Complaints</span>
         </button>
       </nav>
 
@@ -1429,7 +1691,6 @@ export default function App() {
         {/* VIEW 2: ROOM GRID & VACANCY DASHBOARD */}
         {activeTab === 'grid' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
           <div className="p-4 sm:p-6 space-y-5">
-            {/* Header & Primary Actions */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div>
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight">Hostel Rooms & Vacancy Dashboard</h2>
@@ -1464,7 +1725,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Status Legend & Dynamic Controls */}
             <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3 text-xs`}>
               <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center space-x-3 font-semibold text-[11px]">
@@ -1510,7 +1770,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Status Filter Chips */}
               <div className="flex items-center space-x-2 overflow-x-auto pt-1">
                 <span className="text-slate-400 font-bold text-[11px] mr-1">Filter:</span>
                 {['ALL', 'VACANT', 'PARTIAL', 'FULL'].map(status => (
@@ -1529,12 +1788,10 @@ export default function App() {
               </div>
             </div>
 
-            {/* Block Wise Breakdown & Room Grids */}
             {HOSTEL_BLOCKS.map(blockName => {
               const bStat = occupancyStats.blockBreakdown[blockName];
               let blockRooms = rooms.filter(r => normalizeBlockName(r.block) === blockName);
 
-              // Apply search & status filters on rooms
               blockRooms = blockRooms.filter(rm => {
                 const occupants = approvedStudents.filter(s => 
                   normalizeBlockName(s.block) === blockName && 
@@ -1543,12 +1800,10 @@ export default function App() {
                 const capacity = parseInt(rm.seater, 10) || 1;
                 const count = occupants.length;
 
-                // Status Filter
                 if (roomFilterStatus === 'VACANT' && count > 0) return false;
                 if (roomFilterStatus === 'PARTIAL' && (count === 0 || count >= capacity)) return false;
                 if (roomFilterStatus === 'FULL' && count < capacity) return false;
 
-                // Search Query
                 if (roomSearchQuery.trim()) {
                   const q = roomSearchQuery.toLowerCase();
                   const matchesRoom = rm.room_no.toLowerCase().includes(q);
@@ -1559,7 +1814,6 @@ export default function App() {
                 return true;
               });
 
-              // Apply Sorting
               blockRooms.sort((a, b) => {
                 if (roomSortOption === 'OCCUPANCY') {
                   const occA = approvedStudents.filter(s => normalizeBlockName(s.block) === blockName && String(s.room_no || s.roomNo || '').trim() === String(a.room_no).trim()).length;
@@ -1570,16 +1824,12 @@ export default function App() {
               });
 
               const isSearching = roomSearchQuery.trim().length > 0;
-              // If searching and this block has 0 matching rooms, hide block completely
               if (isSearching && blockRooms.length === 0) return null;
 
-              // Auto-expand during search; otherwise respect user collapse state
               const isCollapsed = isSearching ? false : collapsedBlocks[blockName];
 
               return (
                 <div key={blockName} className={`p-4 sm:p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3`}>
-                  
-                  {/* Block Header Summary Card */}
                   <div 
                     onClick={() => toggleBlockCollapse(blockName)}
                     className="flex justify-between items-center pb-2 cursor-pointer border-b border-slate-100 dark:border-slate-800 hover:opacity-90 transition"
@@ -1609,7 +1859,6 @@ export default function App() {
 
                   {!isCollapsed && (
                     <>
-                      {/* Progress bar */}
                       <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
                         <div 
                           className="bg-indigo-600 h-full rounded-full transition-all duration-300" 
@@ -1617,7 +1866,6 @@ export default function App() {
                         />
                       </div>
 
-                      {/* Room Cards Grid */}
                       {blockRooms.length > 0 ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 pt-2">
                           {blockRooms.map(rm => {
@@ -1703,7 +1951,6 @@ export default function App() {
               </div>
 
               <div className="flex items-center space-x-2 w-full sm:w-auto">
-                {/* Mobile Filter Toggle Chip */}
                 <button
                   onClick={() => setMobileFiltersOpen(true)}
                   className="md:hidden flex-1 min-h-[44px] px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-slate-200 dark:border-slate-700"
@@ -1717,7 +1964,7 @@ export default function App() {
                   )}
                 </button>
 
-                {sessionUser.role === 'admin' && (
+                {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
                   <button
                     onClick={() => {
                       setEditingStudent({ 
@@ -1735,7 +1982,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Desktop Filter Bar (Hidden on Mobile) */}
+            {/* Desktop Filter Bar */}
             <div className={`hidden md:block p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3 text-xs`}>
               <div className="grid grid-cols-5 gap-3">
                 <div>
@@ -1806,7 +2053,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Mobile Card List (< md screen) */}
+            {/* Mobile Card List */}
             <div className="md:hidden space-y-3">
               {filteredStudents.length > 0 ? (
                 filteredStudents.map(std => (
@@ -1826,13 +2073,15 @@ export default function App() {
                         </div>
                       </div>
 
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        std.fee_status === 'Paid' 
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' 
-                          : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
-                      }`}>
-                        {std.fee_status || 'Pending'}
-                      </span>
+                      <div className="flex items-center space-x-1">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          std.fee_status === 'Paid' 
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' 
+                            : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
+                        }`}>
+                          {std.fee_status || 'Pending'}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-100 dark:border-slate-800/80">
@@ -1840,18 +2089,34 @@ export default function App() {
                         Room {std.room_no || std.roomNo || 'Unassigned'} • <span className="font-normal text-slate-500">{normalizeBlockName(std.block)}</span>
                       </div>
 
-                      {std.phone ? (
-                        <a
-                          href={`tel:${std.phone}`}
-                          onClick={e => e.stopPropagation()}
-                          className="flex items-center space-x-1 text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg font-mono font-medium text-[11px]"
-                        >
-                          <Phone className="w-3 h-3 text-indigo-500" />
-                          <span>{std.phone}</span>
-                        </a>
-                      ) : (
-                        <span className="text-slate-400 text-[11px]">No Phone</span>
-                      )}
+                      <div className="flex items-center space-x-2">
+                        {std.phone ? (
+                          <a
+                            href={`tel:${std.phone}`}
+                            onClick={e => e.stopPropagation()}
+                            className="flex items-center space-x-1 text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-lg font-mono font-medium text-[11px]"
+                          >
+                            <Phone className="w-3 h-3 text-indigo-500" />
+                            <span>{std.phone}</span>
+                          </a>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">No Phone</span>
+                        )}
+
+                        {/* FEATURE 5: DIRECT DELETE ON MOBILE CARD FOR ADMIN */}
+                        {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteResident(std);
+                            }}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition"
+                            title="Delete Resident"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -1863,7 +2128,7 @@ export default function App() {
               )}
             </div>
 
-            {/* Desktop Data Table (md+ screen) */}
+            {/* Desktop Data Table */}
             <div className={`hidden md:block rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} overflow-x-auto shadow-sm`}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
@@ -1909,9 +2174,15 @@ export default function App() {
                           <button onClick={() => { setSelectedStudent(std); setProfileModalTab('details'); }} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
                             <Eye className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
                           </button>
-                          {sessionUser.role === 'admin' && (
+                          {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
                             <button onClick={() => { setEditingStudent(std); setIsEditStudentModalOpen(true); }} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
                               <Edit className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            </button>
+                          )}
+                          {/* FEATURE 5: DELETE BUTTON ON DESKTOP TABLE */}
+                          {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                            <button onClick={() => handleDeleteResident(std)} className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-950/50 rounded text-rose-600 dark:text-rose-400" title="Delete Resident">
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           )}
                         </td>
@@ -2060,7 +2331,6 @@ export default function App() {
 
                     <p className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 p-3 rounded-xl">{tkt.description}</p>
 
-                    {/* Comments Thread */}
                     <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                       <h4 className="font-bold text-[11px] uppercase text-slate-400">Responses ({tkt.comments?.length || 0})</h4>
 
@@ -2110,42 +2380,84 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 6: HOSTEL MAP */}
+        {/* FEATURE 2: HOSTEL MAP VIEW (ENHANCED RESTORED) */}
         {activeTab === 'map' && (
           <div className="p-4 sm:p-6 space-y-4 max-w-5xl mx-auto w-full">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div>
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight">Hostel Floor Plan & Layout Map</h2>
-                <p className="text-xs text-slate-500">Visual layout reference for hostel blocks.</p>
+                <p className="text-xs text-slate-500">Interactive visual layout reference for hostel blocks and room positions.</p>
               </div>
 
-              {sessionUser.role === 'admin' && (
-                <button
-                  onClick={() => setIsMapModalOpen(true)}
-                  className="min-h-[44px] px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow flex items-center space-x-1.5"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span>Upload Map</span>
-                </button>
-              )}
+              <div className="flex items-center space-x-2 w-full sm:w-auto">
+                {hostelMapUrl && (
+                  <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                    <button
+                      onClick={() => setMapZoomLevel(prev => Math.min(prev + 0.25, 2.5))}
+                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300"
+                      title="Zoom In"
+                    >
+                      <ZoomIn className="w-4 h-4" />
+                    </button>
+                    <span className="text-[11px] font-mono px-1 font-bold">{Math.round(mapZoomLevel * 100)}%</span>
+                    <button
+                      onClick={() => setMapZoomLevel(prev => Math.max(prev - 0.25, 0.75))}
+                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300"
+                      title="Zoom Out"
+                    >
+                      <ZoomOut className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setMapZoomLevel(1)}
+                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300"
+                      title="Reset Zoom"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                  <button
+                    onClick={() => setIsMapModalOpen(true)}
+                    className="min-h-[44px] px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow flex items-center justify-center space-x-1.5 transition active:scale-95"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>{hostelMapUrl ? 'Change Map' : 'Upload Map'}</span>
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm min-h-[400px] flex items-center justify-center`}>
+            <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm min-h-[450px] flex items-center justify-center overflow-auto relative`}>
               {hostelMapUrl ? (
-                <div className="space-y-3 w-full text-center">
-                  <img src={hostelMapUrl} alt="Hostel Layout Map" className="w-full h-auto max-h-[75vh] object-contain rounded-xl mx-auto" />
+                <div className="w-full text-center overflow-auto py-2">
+                  <img 
+                    src={hostelMapUrl} 
+                    alt="Hostel Layout Map" 
+                    style={{ transform: `scale(${mapZoomLevel})`, transformOrigin: 'top center', transition: 'transform 0.2s ease-out' }}
+                    className="w-full h-auto max-h-[75vh] object-contain rounded-xl mx-auto shadow-md" 
+                  />
                 </div>
               ) : (
-                <div className="text-center space-y-3 p-8">
-                  <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-full flex items-center justify-center mx-auto">
-                    <ImageIcon className="w-8 h-8" />
+                <div className="text-center space-y-3 p-8 max-w-sm">
+                  <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
+                    <MapIcon className="w-8 h-8 text-indigo-500" />
                   </div>
-                  <h3 className="font-bold text-sm">No Hostel Map Uploaded</h3>
-                  <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                    {sessionUser.role === 'admin' 
-                      ? 'Click "Upload Map" above to attach a floor layout image.' 
-                      : 'The hostel admin has not uploaded a floor plan yet.'}
+                  <h3 className="font-bold text-base">No Hostel Map Uploaded</h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    {(sessionUser.role === 'admin' || sessionUser.role === 'authorized')
+                      ? 'Upload a floor plan image or image URL to give residents a clear visual map of the hostel blocks.' 
+                      : 'The hostel authority has not uploaded a floor layout plan yet.'}
                   </p>
+                  {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                    <button
+                      onClick={() => setIsMapModalOpen(true)}
+                      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow transition"
+                    >
+                      Upload Layout Image
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -2281,9 +2593,6 @@ export default function App() {
                       Block: {normalizeBlockName(selectedResidentToLink.block)} | Room: {selectedResidentToLink.room_no || 'Unassigned'} | Batch: {selectedResidentToLink.batch} ({selectedResidentToLink.course})
                     </p>
                   </div>
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    This will grant this user access to all room records, fee ledgers, and movement history associated with this resident profile.
-                  </p>
                 </div>
 
                 <div className="flex justify-end space-x-2 pt-2 border-t border-slate-200 dark:border-slate-800">
@@ -2306,15 +2615,15 @@ export default function App() {
         </div>
       )}
 
-      {/* ADMIN TOOLS & DATA MODAL / BOTTOM SHEET */}
+      {/* ADMIN TOOLS & DATA MODAL */}
       {isAdminToolsOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className={`w-full max-w-md rounded-t-3xl sm:rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200`}>
+          <div className={`w-full max-w-md rounded-t-3xl sm:rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
               <div>
                 <h3 className="font-bold text-base flex items-center space-x-2">
                   <Settings className="w-4 h-4 text-indigo-500" />
-                  <span>Admin Data Tools</span>
+                  <span>Admin Settings & Data</span>
                 </h3>
                 {lastSynced && (
                   <p className="text-[10px] text-slate-400 mt-0.5">Last synced from repo: {lastSynced}</p>
@@ -2326,6 +2635,32 @@ export default function App() {
             </div>
 
             <div className="space-y-2.5 pt-1">
+              {/* FEATURE 4: CUSTOM LOGO CONTROL */}
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-xs text-slate-600 dark:text-slate-300">Custom App Logo</span>
+                  {config.appLogo && (
+                    <button 
+                      onClick={() => setConfig(prev => ({ ...prev, appLogo: '' }))}
+                      className="text-[10px] text-rose-500 font-bold hover:underline"
+                    >
+                      Reset Default
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center p-1 shadow">
+                    <AppLogoIcon className="w-6 h-6" />
+                  </div>
+                  <button
+                    onClick={() => logoInputRef.current?.click()}
+                    className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-400 font-bold rounded-xl text-xs border border-indigo-200 dark:border-indigo-900 transition"
+                  >
+                    Upload New Logo
+                  </button>
+                </div>
+              </div>
+
               <button
                 onClick={() => {
                   loadJSONFromRepo(true);
@@ -2374,7 +2709,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MOBILE MASTER DIRECTORY FILTERS MODAL / BOTTOM SHEET */}
+      {/* MOBILE MASTER DIRECTORY FILTERS MODAL */}
       {mobileFiltersOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end justify-center p-0">
           <div className={`w-full rounded-t-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border-t p-6 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto`}>
@@ -2479,7 +2814,7 @@ export default function App() {
       )}
 
       {/* MAP UPLOAD MODAL */}
-      {isMapModalOpen && sessionUser.role === 'admin' && (
+      {isMapModalOpen && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
             <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
@@ -2581,10 +2916,10 @@ export default function App() {
         </div>
       )}
 
-      {/* RESIDENT PROFILE MODAL */}
+      {/* RESIDENT PROFILE MODAL WITH ENHANCED FEE LEDGER & DELETE RESIDENT */}
       {selectedStudent && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className={`w-full max-w-2xl rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-5 shadow-2xl my-8`}>
+          <div className={`w-full max-w-2xl rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-5 shadow-2xl my-8 max-h-[90vh] overflow-y-auto`}>
             
             <div className="flex justify-between items-start pb-3 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center space-x-4">
@@ -2596,7 +2931,7 @@ export default function App() {
                   <p className="text-xs text-slate-400 mt-0.5">{selectedStudent.course} • Batch {selectedStudent.batch} • Roll: {selectedStudent.roll_no || 'N/A'}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedStudent(null)}><X className="w-5 h-5" /></button>
+              <button onClick={() => { setSelectedStudent(null); setEditingFeeEntry(null); }}><X className="w-5 h-5" /></button>
             </div>
 
             <div className="flex space-x-2 border-b border-slate-200 dark:border-slate-800 pb-2 text-xs overflow-x-auto">
@@ -2645,38 +2980,216 @@ export default function App() {
               </div>
             )}
 
+            {/* FEATURE 1: IMPROVED FEE LEDGER WITH EDIT MODE & FINANCIAL SUMMARY */}
             {profileModalTab === 'fee' && (
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden text-xs">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-100 dark:bg-slate-900 font-bold uppercase text-slate-500">
-                    <tr>
-                      <th className="p-2.5">Academic Session</th>
-                      <th className="p-2.5">Room Held</th>
-                      <th className="p-2.5">Amount Paid</th>
-                      <th className="p-2.5">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                    {selectedStudent.fee_ledger && selectedStudent.fee_ledger.length > 0 ? (
-                      selectedStudent.fee_ledger.map((leg, idx) => (
-                        <tr key={idx}>
-                          <td className="p-2.5 font-bold">{leg.year}</td>
-                          <td className="p-2.5 text-indigo-600 dark:text-indigo-400">{normalizeBlockName(leg.block)}, Rm {leg.room_no}</td>
-                          <td className="p-2.5 font-bold">₹{leg.paid} / ₹{leg.amount}</td>
-                          <td className="p-2.5">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${leg.status === 'Paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'}`}>
-                              {leg.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
+              <div className="space-y-4 text-xs">
+                
+                {/* Summary Card */}
+                <div className="grid grid-cols-3 gap-2 p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Total Required</span>
+                    <p className="font-black text-sm sm:text-base text-slate-800 dark:text-slate-100 mt-0.5">₹{feeSummary.totalDue.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">Total Paid</span>
+                    <p className="font-black text-sm sm:text-base text-emerald-600 dark:text-emerald-400 mt-0.5">₹{feeSummary.totalPaid.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-rose-500 uppercase">Outstanding Balance</span>
+                    <p className="font-black text-sm sm:text-base text-rose-600 dark:text-rose-400 mt-0.5">₹{feeSummary.balance.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                {/* Admin Add Fee Entry Button */}
+                {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && editingFeeEntry === null && (
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => {
+                        setEditingFeeEntry('new');
+                        setFeeFormData({
+                          year: '2026-27',
+                          amount: 45000,
+                          paid: 45000,
+                          status: 'Paid',
+                          date: new Date().toISOString().split('T')[0],
+                          notes: ''
+                        });
+                      }}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1 shadow transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Fee Entry</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Add / Edit Fee Entry Form */}
+                {editingFeeEntry !== null && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                  <form onSubmit={handleSaveFeeEntry} className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900 space-y-3">
+                    <div className="flex justify-between items-center pb-1 border-b border-slate-200 dark:border-slate-800">
+                      <h4 className="font-bold text-xs text-indigo-600 dark:text-indigo-400 uppercase">
+                        {editingFeeEntry === 'new' ? 'New Fee Entry' : 'Edit Fee Entry'}
+                      </h4>
+                      <button type="button" onClick={() => setEditingFeeEntry(null)} className="text-slate-400 hover:text-slate-200">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="font-bold text-[10px] text-slate-400 block mb-1">Academic Year</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. 2026-27"
+                          value={feeFormData.year}
+                          onChange={e => setFeeFormData({ ...feeFormData, year: e.target.value })}
+                          className={`w-full p-2 rounded-xl border text-xs ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-300'}`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-[10px] text-slate-400 block mb-1">Amount Due (₹)</label>
+                        <input
+                          type="number"
+                          required
+                          value={feeFormData.amount}
+                          onChange={e => setFeeFormData({ ...feeFormData, amount: e.target.value })}
+                          className={`w-full p-2 rounded-xl border text-xs ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-300'}`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-[10px] text-slate-400 block mb-1">Amount Paid (₹)</label>
+                        <input
+                          type="number"
+                          required
+                          value={feeFormData.paid}
+                          onChange={e => setFeeFormData({ ...feeFormData, paid: e.target.value })}
+                          className={`w-full p-2 rounded-xl border text-xs ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-300'}`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-[10px] text-slate-400 block mb-1">Payment Status</label>
+                        <select
+                          value={feeFormData.status}
+                          onChange={e => setFeeFormData({ ...feeFormData, status: e.target.value })}
+                          className={`w-full p-2 rounded-xl border text-xs ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-300'}`}
+                        >
+                          <option value="Paid">Paid</option>
+                          <option value="Partial">Partial</option>
+                          <option value="Pending">Pending</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-[10px] text-slate-400 block mb-1">Payment Date</label>
+                        <input
+                          type="date"
+                          value={feeFormData.date}
+                          onChange={e => setFeeFormData({ ...feeFormData, date: e.target.value })}
+                          className={`w-full p-2 rounded-xl border text-xs ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-300'}`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-[10px] text-slate-400 block mb-1">Notes / Remarks</label>
+                        <input
+                          type="text"
+                          placeholder="Optional notes..."
+                          value={feeFormData.notes}
+                          onChange={e => setFeeFormData({ ...feeFormData, notes: e.target.value })}
+                          className={`w-full p-2 rounded-xl border text-xs ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-300'}`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end space-x-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditingFeeEntry(null)}
+                        className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 font-bold rounded-xl text-xs"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow flex items-center space-x-1"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Save Entry</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Ledger Table */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden text-xs">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-100 dark:bg-slate-900 font-bold uppercase text-slate-500 text-[10px]">
                       <tr>
-                        <td colSpan="4" className="p-4 text-center text-slate-400 italic">No fee ledger recorded yet.</td>
+                        <th className="p-2.5">Session</th>
+                        <th className="p-2.5">Room</th>
+                        <th className="p-2.5">Amount Paid</th>
+                        <th className="p-2.5">Status</th>
+                        <th className="p-2.5">Notes</th>
+                        {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                          <th className="p-2.5 text-right">Actions</th>
+                        )}
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {selectedStudent.fee_ledger && selectedStudent.fee_ledger.length > 0 ? (
+                        selectedStudent.fee_ledger.map((leg, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
+                            <td className="p-2.5 font-bold">{leg.year}</td>
+                            <td className="p-2.5 text-indigo-600 dark:text-indigo-400">{normalizeBlockName(leg.block)}, Rm {leg.room_no}</td>
+                            <td className="p-2.5 font-bold">₹{leg.paid?.toLocaleString()} / ₹{leg.amount?.toLocaleString()}</td>
+                            <td className="p-2.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${leg.status === 'Paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'}`}>
+                                {leg.status}
+                              </span>
+                            </td>
+                            <td className="p-2.5 text-slate-400 text-[11px] truncate max-w-[120px]">{leg.notes || leg.remarks || '-'}</td>
+                            {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                              <td className="p-2.5 text-right space-x-1">
+                                <button
+                                  onClick={() => {
+                                    setEditingFeeEntry(idx);
+                                    setFeeFormData({
+                                      year: leg.year || '2026-27',
+                                      amount: leg.amount || 45000,
+                                      paid: leg.paid || 0,
+                                      status: leg.status || 'Pending',
+                                      date: leg.date || new Date().toISOString().split('T')[0],
+                                      notes: leg.notes || leg.remarks || ''
+                                    });
+                                  }}
+                                  className="p-1 text-indigo-600 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
+                                  title="Edit Fee Entry"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteFeeEntry(idx)}
+                                  className="p-1 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-950/50 rounded"
+                                  title="Delete Fee Entry"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="6" className="p-4 text-center text-slate-400 italic">No fee ledger recorded yet.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -2698,33 +3211,45 @@ export default function App() {
               </div>
             )}
 
-            {sessionUser.role === 'admin' && (
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between gap-2">
+            {/* ACTION BAR IN PROFILE MODAL (WITH DISTINCT DELETE RESIDENT BUTTON) */}
+            {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-2">
+                {/* FEATURE 5: DELETE RESIDENT BUTTON */}
                 <button
-                  onClick={() => {
-                    setTransferData({ 
-                      studentId: selectedStudent.id, 
-                      targetBlock: 'Office Block', 
-                      targetRoom: '', 
-                      transferDate: new Date().toISOString().split('T')[0],
-                      academicYear: '2026-27',
-                      reason: 'Annual Room Shift' 
-                    });
-                    setIsTransferModalOpen(true);
-                  }}
-                  className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold rounded-xl text-xs"
+                  onClick={() => handleDeleteResident(selectedStudent)}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition active:scale-95"
                 >
-                  Direct Room Shift
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Resident</span>
                 </button>
-                <button
-                  onClick={() => {
-                    setEditingStudent(selectedStudent);
-                    setIsEditStudentModalOpen(true);
-                  }}
-                  className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow"
-                >
-                  Edit Full Profile
-                </button>
+
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => {
+                      setTransferData({ 
+                        studentId: selectedStudent.id, 
+                        targetBlock: 'Office Block', 
+                        targetRoom: '', 
+                        transferDate: new Date().toISOString().split('T')[0],
+                        academicYear: '2026-27',
+                        reason: 'Annual Room Shift' 
+                      });
+                      setIsTransferModalOpen(true);
+                    }}
+                    className="px-3.5 py-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold rounded-xl text-xs hover:bg-indigo-100 transition"
+                  >
+                    Direct Room Shift
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingStudent(selectedStudent);
+                      setIsEditStudentModalOpen(true);
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow transition"
+                  >
+                    Edit Profile
+                  </button>
+                </div>
               </div>
             )}
 
@@ -3000,7 +3525,7 @@ export default function App() {
       )}
 
       {/* EDIT STUDENT FORM MODAL */}
-      {isEditStudentModalOpen && editingStudent && sessionUser.role === 'admin' && (
+      {isEditStudentModalOpen && editingStudent && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form onSubmit={handleSaveStudent} className={`w-full max-w-lg rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl my-8`}>
             <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
