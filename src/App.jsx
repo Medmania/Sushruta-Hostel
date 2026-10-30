@@ -6,7 +6,8 @@ import {
   Moon, Sun, Sparkles, X, Eye, 
   Upload, Database, Copy, Settings, LogOut, Lock, Mail,
   Map as MapIcon, Image as ImageIcon, Trash2, Calendar, CreditCard, Phone, User, FileText, CheckCircle, AlertCircle,
-  Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson, Download, RefreshCw
+  Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson, Download, RefreshCw,
+  ChevronDown, ChevronUp, SlidersHorizontal, Info, MoreVertical
 } from 'lucide-react';
 
 // --- DEFAULT CONFIGURATION ---
@@ -39,15 +40,13 @@ const normalizeBlockName = (b) => {
 };
 
 // --- JSON CLEANER ---
-// Spreadsheet / pandas exports often contain bare NaN or Infinity, which is NOT valid JSON
-// and makes JSON.parse / response.json() throw. Convert them to null and strip any BOM.
 const sanitizeJSONText = (text) => {
   let t = String(text || '');
   if (t.charCodeAt(0) === 0xFEFF) t = t.slice(1);
   return t.replace(/([:\[,]\s*)-?(NaN|Infinity)(?=\s*[,}\]])/g, '$1null');
 };
 
-// Find a value in a row by flexible column name (ignores case, spaces, dots, underscores)
+// Find a value in a row by flexible column name
 const normKey = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
 const pickField = (item, names) => {
   for (const key of Object.keys(item)) {
@@ -72,6 +71,14 @@ const isOccupantKey = (key) => {
     /^name\d+$/.test(k) ||
     /^bed\d*$/.test(k)
   );
+};
+
+// Format occupant short name for compact display
+const formatShortName = (fullName) => {
+  if (!fullName) return '';
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[1][0]}.`;
 };
 
 export default function App() {
@@ -109,6 +116,9 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isFetchingJson, setIsFetchingJson] = useState(false);
+  const [lastSynced, setLastSynced] = useState(() => localStorage.getItem('obh_last_synced') || '');
+  const [isAdminToolsOpen, setIsAdminToolsOpen] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   // DATA STORES WITH BLOCK NORMALIZATION MIGRATION
   const [students, setStudents] = useState(() => {
@@ -133,7 +143,7 @@ export default function App() {
     }
   });
 
-  // Always-current copy of students (used by auth sync to avoid side-effects inside state updaters)
+  // Always-current copy of students
   const studentsRef = useRef(students);
   studentsRef.current = students;
 
@@ -182,12 +192,18 @@ export default function App() {
 
   const [ticketCommentText, setTicketCommentText] = useState({});
 
-  // Filter & Search States
+  // Master Directory Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBlock, setFilterBlock] = useState('ALL');
   const [filterBatch, setFilterBatch] = useState('ALL');
   const [filterCourse, setFilterCourse] = useState('ALL');
   const [filterFeeStatus, setFilterFeeStatus] = useState('ALL');
+
+  // Rooms View Specific Filters & Controls
+  const [roomFilterStatus, setRoomFilterStatus] = useState('ALL'); // ALL, VACANT, PARTIAL, FULL
+  const [roomSortOption, setRoomSortOption] = useState('ROOM_NO'); // ROOM_NO, OCCUPANCY
+  const [roomSearchQuery, setRoomSearchQuery] = useState('');
+  const [collapsedBlocks, setCollapsedBlocks] = useState({});
 
   // Persistence Sync
   useEffect(() => localStorage.setItem('obh_db_students_v3', JSON.stringify(students)), [students]);
@@ -199,9 +215,7 @@ export default function App() {
     else localStorage.removeItem('obh_hostel_map_v3');
   }, [hostelMapUrl]);
 
-  // --- AUTOMATIC REPO JSON INITIALIZER (runs once, silently) ---
-  // Loads whenever NO ROOMS exist yet. (Previously it checked the student list, but the logged-in
-  // admin's own profile is saved as a student, so the auto-load was skipped after the first login.)
+  // Initial Auto-load JSON
   useEffect(() => {
     if (rooms.length === 0) {
       loadJSONFromRepo(false);
@@ -209,9 +223,8 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Shared Data Parser. Returns true when records were applied.
+  // Shared Data Parser
   const parseAndApplyJSON = (rawData, showPrompt = true) => {
-    // Accept { "Sheet1": [...], "Sheet2": [...] } style wrappers as well as plain arrays
     if (!Array.isArray(rawData) && typeof rawData === 'object' && rawData !== null) {
       const arrays = Object.values(rawData).filter(Array.isArray);
       if (arrays.length > 0) rawData = arrays.flat();
@@ -236,7 +249,6 @@ export default function App() {
     rawData.forEach((item) => {
       if (!item || typeof item !== 'object') { skippedRows++; return; }
 
-      // Block / Batch carry forward from previous rows when the sheet leaves them blank (merged cells)
       const rawBlockVal = pickField(item, ['block', 'wing', 'hostelblock']);
       if (rawBlockVal !== undefined) currentBlock = String(rawBlockVal).trim();
 
@@ -252,7 +264,7 @@ export default function App() {
         if (!isOccupantKey(key)) return;
         const val = String(item[key] ?? '').trim();
         if (!val) return;
-        if (/^\d+(\.\d+)?$/.test(val)) return; // serial numbers etc., not names
+        if (/^\d+(\.\d+)?$/.test(val)) return;
         if (NON_RESIDENT_WORDS.includes(val.toUpperCase())) return;
         const names = val
           .split('\n')
@@ -261,7 +273,6 @@ export default function App() {
         occupants.push(...names);
       });
 
-      // Flat one-row-per-student format
       if (occupants.length === 0) {
         const nameVal = pickField(item, ['name', 'studentname', 'residentname']);
         if (nameVal !== undefined) occupants.push(String(nameVal).trim());
@@ -299,7 +310,6 @@ export default function App() {
           const today = new Date().toISOString().split('T')[0];
 
           importedStudents.push({
-            // Every occupant needs a UNIQUE id (a shared row id would merge roommates into one record)
             id: (occupants.length === 1 && item.id) ? item.id : `std_${Date.now()}_${idCounter}_${Math.random().toString(36).substr(2, 5)}`,
             name: cleanName,
             email: item.email || `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')}@hostel.edu`,
@@ -344,11 +354,10 @@ export default function App() {
     });
 
     if (importedStudents.length === 0 && importedRoomsMap.size === 0) {
-      if (showPrompt) alert("No valid room or resident records could be parsed from the JSON.\n\nEach row needs a 'Room No' column and occupant columns (e.g. 'Occupant 1', 'Occupant 2').");
+      if (showPrompt) alert("No valid room or resident records could be parsed from the JSON.");
       return false;
     }
 
-    // Merge: keep details already saved for a resident (phone, fees, edits); refresh room data from JSON
     setStudents(prev => {
       const existingMap = new Map(prev.map(s => [`${s.name}_${normalizeBlockName(s.block)}_${s.room_no}`, s]));
       importedStudents.forEach(s => {
@@ -365,13 +374,17 @@ export default function App() {
       return Array.from(roomMap.values());
     });
 
+    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setLastSynced(nowStr);
+    localStorage.setItem('obh_last_synced', nowStr);
+
     if (showPrompt) {
-      alert(`Loaded ${importedStudents.length} residents & ${importedRoomsMap.size} rooms from JSON!` + (skippedRows > 0 ? `\n(${skippedRows} rows skipped - no room number)` : ''));
+      alert(`Loaded ${importedStudents.length} residents & ${importedRoomsMap.size} rooms from JSON!` + (skippedRows > 0 ? `\n(${skippedRows} rows skipped)` : ''));
     }
     return true;
   };
 
-  // Fetch the register from the deployed site (public/data/OBH_ROOM_REGISTER.json)
+  // Fetch register from repository
   const loadJSONFromRepo = async (showPrompt = true) => {
     setIsFetchingJson(true);
     const errors = [];
@@ -379,7 +392,6 @@ export default function App() {
 
     for (const path of REGISTER_PATHS) {
       try {
-        // cache-buster + no-store so a freshly deployed file is never masked by an old cached/404 response
         const response = await fetch(`${path}?v=${Date.now()}`, { cache: 'no-store' });
         if (!response.ok) {
           errors.push(`${path} -> HTTP ${response.status}`);
@@ -388,7 +400,7 @@ export default function App() {
 
         const text = await response.text();
         if (text.trim().startsWith('<')) {
-          errors.push(`${path} -> returned a web page, not JSON (file missing from the deployed build)`);
+          errors.push(`${path} -> returned HTML instead of JSON`);
           continue;
         }
 
@@ -396,7 +408,7 @@ export default function App() {
         try {
           rawData = JSON.parse(sanitizeJSONText(text));
         } catch (parseErr) {
-          errors.push(`${path} -> file found but invalid JSON (${parseErr.message})`);
+          errors.push(`${path} -> invalid JSON (${parseErr.message})`);
           continue;
         }
 
@@ -411,17 +423,16 @@ export default function App() {
 
     setIsFetchingJson(false);
 
-    // Only show alert if the user manually clicked "Sync Repo JSON"
     if (!found && showPrompt) {
       alert(
         "Could not load OBH_ROOM_REGISTER.json.\n\n" +
         errors.join('\n') +
-        "\n\nTip: open /data/OBH_ROOM_REGISTER.json on your site directly to check it loads, and make sure the latest Vercel deployment has finished. You can also use 'Upload Local JSON'."
+        "\n\nTip: You can use 'Upload Local JSON' to load the file directly."
       );
     }
   };
 
-  // Export current room register as JSON file to update repository
+  // Export room register
   const handleExportJSON = () => {
     const exportData = rooms.map(rm => {
       const occupants = students.filter(s => normalizeBlockName(s.block) === normalizeBlockName(rm.block) && s.room_no === rm.room_no);
@@ -449,7 +460,7 @@ export default function App() {
     downloadAnchor.remove();
   };
 
-  // Auth Sync Listener
+  // Auth Listener
   useEffect(() => {
     if (!supabase) return;
 
@@ -595,6 +606,7 @@ export default function App() {
   const handleLogout = async () => {
     if (supabase) await supabase.auth.signOut();
     setSessionUser(null);
+    setIsAdminToolsOpen(false);
   };
 
   const handleImportJSON = (e) => {
@@ -619,7 +631,7 @@ export default function App() {
   const approvedStudents = useMemo(() => students.filter(s => s.status === 'approved'), [students]);
   const pendingStudents = useMemo(() => students.filter(s => s.status === 'pending'), [students]);
 
-  // Occupancy Analysis based strictly on normalized block names
+  // Occupancy Analysis
   const occupancyStats = useMemo(() => {
     let totalBedsCapacity = 0;
     let totalOccupiedBeds = 0;
@@ -680,7 +692,17 @@ export default function App() {
     });
   }, [approvedStudents, searchQuery, filterBlock, filterBatch, filterCourse, filterFeeStatus]);
 
-  // Add Dynamic Room (Admin Only)
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filterBlock !== 'ALL') count++;
+    if (filterBatch !== 'ALL') count++;
+    if (filterCourse !== 'ALL') count++;
+    if (filterFeeStatus !== 'ALL') count++;
+    if (searchQuery.trim() !== '') count++;
+    return count;
+  }, [filterBlock, filterBatch, filterCourse, filterFeeStatus, searchQuery]);
+
+  // Add Dynamic Room
   const handleAddRoom = (e) => {
     e.preventDefault();
     if (sessionUser?.role !== 'admin') return alert('Admin access required.');
@@ -707,7 +729,7 @@ export default function App() {
     setNewRoomData({ block: 'Office Block', room_no: '', seater: '1' });
   };
 
-  // Delete Room (Admin Only)
+  // Delete Room
   const handleDeleteRoom = (roomId) => {
     if (sessionUser?.role !== 'admin') return;
     if (window.confirm('Are you sure you want to delete this room configuration?')) {
@@ -716,7 +738,7 @@ export default function App() {
     }
   };
 
-  // Upload/Set Hostel Map (Admin Only)
+  // Save Map URL / Upload
   const handleSaveMapUrl = (e) => {
     e.preventDefault();
     if (mapInputUrl.trim()) {
@@ -738,7 +760,7 @@ export default function App() {
     }
   };
 
-  // Save/Update Resident Record
+  // Save Resident
   const handleSaveStudent = (e) => {
     e.preventDefault();
     if (sessionUser?.role !== 'admin') return alert('Access Denied');
@@ -891,6 +913,25 @@ export default function App() {
     setComplaints(prev => prev.map(tkt => tkt.id === ticketId ? { ...tkt, status: newStatus } : tkt));
   };
 
+  // Helper for active tab title
+  const getTabTitle = (tab) => {
+    switch (tab) {
+      case 'dashboard': return 'Overview & Notices';
+      case 'grid': return 'Rooms & Vacancy';
+      case 'directory': return 'Master Directory';
+      case 'notices': return 'Notice Board';
+      case 'tickets': return 'Complaints Desk';
+      case 'map': return 'Hostel Map';
+      case 'approval': return 'Approval Desk';
+      default: return 'Overview';
+    }
+  };
+
+  // Toggle block collapse state
+  const toggleBlockCollapse = (blockName) => {
+    setCollapsedBlocks(prev => ({ ...prev, [blockName]: !prev[blockName] }));
+  };
+
   // --- LOGIN VIEW ---
   if (!sessionUser) {
     return (
@@ -912,7 +953,7 @@ export default function App() {
 
           <button
             onClick={handleGoogleSignIn}
-            className="w-full py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-2xl text-xs flex items-center justify-center space-x-2 shadow-md transition"
+            className="w-full min-h-[44px] py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-2xl text-xs flex items-center justify-center space-x-2 shadow-md transition"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -963,7 +1004,7 @@ export default function App() {
             <button
               type="submit"
               disabled={authLoading}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl shadow-lg transition"
+              className="w-full min-h-[44px] py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl shadow-lg transition"
             >
               {authLoading ? 'Signing In...' : (isSigningUp ? 'Create Account' : 'Sign In')}
             </button>
@@ -985,7 +1026,7 @@ export default function App() {
 
   // --- MAIN APPLICATION ---
   return (
-    <div className={`min-h-screen ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col md:flex-row font-sans transition-colors duration-200`}>
+    <div className={`min-h-screen ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col md:flex-row font-sans transition-colors duration-200 pb-20 md:pb-0`}>
       
       {/* Hidden File Input for Import */}
       <input 
@@ -996,8 +1037,47 @@ export default function App() {
         className="hidden" 
       />
 
-      {/* SIDEBAR NAVIGATION */}
-      <aside className={`w-full md:w-64 ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} border-r border-b md:border-b-0 flex-shrink-0 flex flex-col justify-between`}>
+      {/* MOBILE STICKY TOP HEADER */}
+      <header className={`md:hidden sticky top-0 z-40 ${darkMode ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'} backdrop-blur-md border-b px-4 py-3 flex items-center justify-between`}>
+        <div className="flex items-center space-x-2.5">
+          <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md">
+            <Building2 className="w-4 h-4" />
+          </div>
+          <div>
+            <h1 className="font-extrabold text-sm leading-tight">OBH PORTAL</h1>
+            <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider">{getTabTitle(activeTab)}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-1">
+          <button 
+            onClick={() => setDarkMode(!darkMode)} 
+            className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            aria-label="Toggle Dark Mode"
+          >
+            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+
+          <button
+            onClick={() => setSelectedStudent(sessionUser)}
+            className="w-8 h-8 bg-indigo-600 text-white rounded-xl flex items-center justify-center font-black text-xs shadow uppercase"
+            aria-label="User Profile"
+          >
+            {(sessionUser.name || 'A').charAt(0)}
+          </button>
+
+          <button
+            onClick={() => setIsAdminToolsOpen(true)}
+            className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition relative"
+            aria-label="Settings and Tools"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* DESKTOP SIDEBAR NAVIGATION */}
+      <aside className={`hidden md:flex md:w-64 ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} border-r flex-shrink-0 flex-col justify-between`}>
         <div>
           <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -1099,37 +1179,18 @@ export default function App() {
 
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 text-xs space-y-2">
           {sessionUser.role === 'admin' && (
-            <>
-              <button
-                onClick={() => loadJSONFromRepo(true)}
-                disabled={isFetchingJson}
-                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex items-center justify-center space-x-2 transition shadow"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isFetchingJson ? 'animate-spin' : ''}`} />
-                <span>{isFetchingJson ? 'Fetching JSON...' : 'Sync Repo JSON'}</span>
-              </button>
-
-              <button
-                onClick={handleExportJSON}
-                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center space-x-2 transition shadow"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export JSON File</span>
-              </button>
-
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center space-x-2 transition shadow"
-              >
-                <FileJson className="w-3.5 h-3.5" />
-                <span>Upload Local JSON</span>
-              </button>
-            </>
+            <button
+              onClick={() => setIsAdminToolsOpen(true)}
+              className="w-full py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-bold flex items-center justify-center space-x-2 transition border border-slate-200 dark:border-slate-700"
+            >
+              <Settings className="w-4 h-4" />
+              <span>Admin Tools & Data</span>
+            </button>
           )}
 
           <button
             onClick={handleLogout}
-            className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl font-bold flex items-center justify-center space-x-2 transition"
+            className="w-full py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl font-bold flex items-center justify-center space-x-2 transition"
           >
             <LogOut className="w-4 h-4" />
             <span>Sign Out</span>
@@ -1137,34 +1198,83 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN VIEW */}
+      {/* MOBILE FIXED BOTTOM TAB BAR (5 Tabs) */}
+      <nav className={`md:hidden fixed bottom-0 left-0 right-0 z-40 ${darkMode ? 'bg-slate-950/95 border-slate-800' : 'bg-white/95 border-slate-200'} backdrop-blur-md border-t flex justify-around items-center py-2 px-1 shadow-lg`}>
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'dashboard' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <Building2 className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-medium">Overview</span>
+        </button>
+
+        <button
+          onClick={() => {
+            if (sessionUser.role === 'admin' || sessionUser.role === 'authorized') setActiveTab('grid');
+            else alert('Access restricted to Authorized Personnel.');
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'grid' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <BedDouble className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-medium">Rooms</span>
+        </button>
+
+        <button
+          onClick={() => {
+            if (sessionUser.role === 'admin' || sessionUser.role === 'authorized') setActiveTab('directory');
+            else alert('Access restricted to Authorized Personnel.');
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'directory' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-medium">Directory</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('notices')}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'notices' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <Bell className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-medium">Notices</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('tickets')}
+          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${activeTab === 'tickets' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <MessageSquare className="w-5 h-5" />
+          <span className="text-[10px] mt-1 font-medium">Complaints</span>
+        </button>
+      </nav>
+
+      {/* MAIN VIEW CONTAINER */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto max-h-screen">
         
         {/* VIEW 1: OVERVIEW */}
         {activeTab === 'dashboard' && (
-          <div className="p-6 max-w-5xl mx-auto space-y-6 w-full">
+          <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5 w-full">
             
-            {/* User Profile Card */}
-            <div className={`p-6 rounded-3xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4`}>
+            {/* User Profile Summary Card */}
+            <div className={`p-5 sm:p-6 rounded-3xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4`}>
               <div className="flex items-center space-x-4">
-                <div className="w-14 h-14 bg-indigo-600 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-md uppercase">
+                <div className="w-12 h-12 sm:w-14 sm:h-14 bg-indigo-600 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-md uppercase">
                   {(sessionUser.name || 'A').charAt(0)}
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold">{sessionUser.name}</h2>
+                  <h2 className="text-lg sm:text-xl font-bold">{sessionUser.name}</h2>
                   <p className="text-xs text-slate-400 mt-0.5">{sessionUser.course} • Batch {sessionUser.batch} • Roll: {sessionUser.roll_no || 'N/A'}</p>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3 text-xs">
+              <div className="flex items-center space-x-3 text-xs w-full sm:w-auto justify-between sm:justify-end">
                 <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-100 dark:border-indigo-900">
                   Room {sessionUser.room_no || 'Unassigned'} ({normalizeBlockName(sessionUser.block)})
                 </div>
                 <button
                   onClick={() => setSelectedStudent(sessionUser)}
-                  className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow"
+                  className="min-h-[44px] px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow transition active:scale-95"
                 >
-                  My Profile & Ledger
+                  Profile & Ledger
                 </button>
               </div>
             </div>
@@ -1197,7 +1307,7 @@ export default function App() {
             {/* Recent Notices Feed */}
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <h3 className="font-bold text-xs uppercase text-slate-400 tracking-wider flex items-center space-x-1">
+                <h3 className="font-bold text-xs uppercase text-slate-400 tracking-wider flex items-center space-x-1.5">
                   <Bell className="w-3.5 h-3.5 text-indigo-500" />
                   <span>Recent Hostel Notices</span>
                 </h3>
@@ -1213,17 +1323,21 @@ export default function App() {
                     <div key={not.id} className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-2 shadow-sm`}>
                       <div className="flex justify-between items-start">
                         <h4 className="font-bold text-sm text-indigo-600 dark:text-indigo-400">{not.title}</h4>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                          not.priority === 'Urgent' || not.priority === 'Fee Notice'
+                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                        }`}>
                           {not.priority}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-300">{not.body}</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{not.body}</p>
                       <div className="flex justify-between items-center pt-2 text-[10px] text-slate-400 border-t border-slate-100 dark:border-slate-800">
                         <span>Posted by {not.posted_by} on {not.date}</span>
                         {not.file_url && (
                           <a href={not.file_url} target="_blank" rel="noreferrer" className="text-indigo-500 font-bold hover:underline flex items-center space-x-1">
                             <Paperclip className="w-3 h-3" />
-                            <span>{not.file_name || 'Download Attachment'}</span>
+                            <span>{not.file_name || 'Attachment'}</span>
                           </a>
                         )}
                       </div>
@@ -1231,8 +1345,9 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <div className="p-8 text-center text-xs text-slate-400 italic border border-dashed rounded-2xl">
-                  No notices posted yet.
+                <div className="p-8 text-center text-xs text-slate-400 border border-dashed rounded-2xl space-y-2">
+                  <Bell className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700" />
+                  <p>No notices posted yet.</p>
                 </div>
               )}
             </div>
@@ -1240,36 +1355,25 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: ROOM GRID & DYNAMIC ROOM CONFIGURATION */}
+        {/* VIEW 2: ROOM GRID & VACANCY DASHBOARD */}
         {activeTab === 'grid' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
-          <div className="p-6 space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="p-4 sm:p-6 space-y-5">
+            {/* Header & Primary Actions */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div>
-                <h2 className="text-xl font-bold tracking-tight">Hostel Rooms & Vacancy Dashboard</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Configure rooms dynamically and view room capacity.</p>
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight">Hostel Rooms & Vacancy Dashboard</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {occupancyStats.totalOccupiedBeds} beds occupied out of {occupancyStats.totalBedsCapacity} total • {occupancyStats.totalVacantBeds} beds available
+                </p>
               </div>
 
               {sessionUser.role === 'admin' && (
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => loadJSONFromRepo(true)}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Sync Repo JSON</span>
-                  </button>
-                  <button
-                    onClick={handleExportJSON}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Export JSON</span>
-                  </button>
+                <div className="flex items-center space-x-2 w-full sm:w-auto">
                   <button
                     onClick={() => setIsAddRoomModalOpen(true)}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                    className="min-h-[44px] flex-1 sm:flex-initial px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow flex items-center justify-center space-x-1.5 transition active:scale-95"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-4 h-4" />
                     <span>Add Room</span>
                   </button>
                   <button
@@ -1280,107 +1384,222 @@ export default function App() {
                       });
                       setIsEditStudentModalOpen(true);
                     }}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                    className="min-h-[44px] flex-1 sm:flex-initial px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs shadow flex items-center justify-center space-x-1.5 transition active:scale-95"
                   >
-                    <User className="w-3.5 h-3.5" />
+                    <User className="w-4 h-4" />
                     <span>Register Resident</span>
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Block Wise Breakdown Table */}
-            <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3`}>
-              <h3 className="font-bold text-xs uppercase text-slate-400 tracking-wider">Block-Wise Vacancy & Capacity Status</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {HOSTEL_BLOCKS.map(block => {
-                  const bStat = occupancyStats.blockBreakdown[block];
-                  return (
-                    <div key={block} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
-                      <div className="flex justify-between items-center font-bold">
-                        <span>{block}</span>
-                        <span className="text-indigo-600 dark:text-indigo-400 font-mono">{bStat.occupied}/{bStat.totalCapacity} Beds</span>
-                      </div>
-                      <div className="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+            {/* Status Legend & Dynamic Controls */}
+            <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3 text-xs`}>
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center space-x-3 font-semibold text-[11px]">
+                  <span className="text-slate-400">Legend:</span>
+                  <span className="flex items-center space-x-1 text-emerald-600 dark:text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>Vacant</span>
+                  </span>
+                  <span className="flex items-center space-x-1 text-amber-600 dark:text-amber-400">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <span>Partial</span>
+                  </span>
+                  <span className="flex items-center space-x-1 text-rose-600 dark:text-rose-400">
+                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                    <span>Full</span>
+                  </span>
+                </div>
+
+                <div className="flex items-center space-x-2 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:w-48">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search room / name..."
+                      value={roomSearchQuery}
+                      onChange={e => setRoomSearchQuery(e.target.value)}
+                      className={`w-full pl-8 pr-3 py-1.5 rounded-xl border text-xs ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                    />
+                  </div>
+                  <select
+                    value={roomSortOption}
+                    onChange={e => setRoomSortOption(e.target.value)}
+                    className={`p-1.5 rounded-xl border text-xs font-medium ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                  >
+                    <option value="ROOM_NO">Sort: Room No</option>
+                    <option value="OCCUPANCY">Sort: Occupancy</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Status Filter Chips */}
+              <div className="flex items-center space-x-2 overflow-x-auto pt-1">
+                <span className="text-slate-400 font-bold text-[11px] mr-1">Filter:</span>
+                {['ALL', 'VACANT', 'PARTIAL', 'FULL'].map(status => (
+                  <button
+                    key={status}
+                    onClick={() => setRoomFilterStatus(status)}
+                    className={`px-3 py-1 rounded-xl font-bold text-[11px] transition whitespace-nowrap ${
+                      roomFilterStatus === status
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                    }`}
+                  >
+                    {status === 'ALL' ? 'All Rooms' : status.charAt(0) + status.slice(1).toLowerCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Block Wise Breakdown & Room Grids */}
+            {HOSTEL_BLOCKS.map(blockName => {
+              const bStat = occupancyStats.blockBreakdown[blockName];
+              let blockRooms = rooms.filter(r => normalizeBlockName(r.block) === blockName);
+
+              // Apply search & status filters on rooms
+              blockRooms = blockRooms.filter(rm => {
+                const occupants = approvedStudents.filter(s => 
+                  normalizeBlockName(s.block) === blockName && 
+                  String(s.room_no || s.roomNo || '').trim() === String(rm.room_no).trim()
+                );
+                const capacity = parseInt(rm.seater, 10) || 1;
+                const count = occupants.length;
+
+                // Status Filter
+                if (roomFilterStatus === 'VACANT' && count > 0) return false;
+                if (roomFilterStatus === 'PARTIAL' && (count === 0 || count >= capacity)) return false;
+                if (roomFilterStatus === 'FULL' && count < capacity) return false;
+
+                // Search Query
+                if (roomSearchQuery.trim()) {
+                  const q = roomSearchQuery.toLowerCase();
+                  const matchesRoom = rm.room_no.toLowerCase().includes(q);
+                  const matchesOccupant = occupants.some(occ => occ.name.toLowerCase().includes(q));
+                  if (!matchesRoom && !matchesOccupant) return false;
+                }
+
+                return true;
+              });
+
+              // Apply Sorting
+              blockRooms.sort((a, b) => {
+                if (roomSortOption === 'OCCUPANCY') {
+                  const occA = approvedStudents.filter(s => normalizeBlockName(s.block) === blockName && String(s.room_no || s.roomNo || '').trim() === String(a.room_no).trim()).length;
+                  const occB = approvedStudents.filter(s => normalizeBlockName(s.block) === blockName && String(s.room_no || s.roomNo || '').trim() === String(b.room_no).trim()).length;
+                  return occB - occA;
+                }
+                return a.room_no.localeCompare(b.room_no, undefined, { numeric: true });
+              });
+
+              const isCollapsed = collapsedBlocks[blockName];
+
+              return (
+                <div key={blockName} className={`p-4 sm:p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3`}>
+                  
+                  {/* Block Header Summary Card */}
+                  <div 
+                    onClick={() => toggleBlockCollapse(blockName)}
+                    className="flex justify-between items-center pb-2 cursor-pointer border-b border-slate-100 dark:border-slate-800 hover:opacity-90 transition"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <MapPin className="w-4 h-4 text-indigo-500" />
+                      <h3 className="font-bold text-base">{blockName}</h3>
+                      {bStat.fullyVacant > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold text-[10px]">
+                          {bStat.fullyVacant} Vacant Rooms
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center space-x-3">
+                      <span className="text-xs text-slate-500 font-mono hidden sm:inline">
+                        {bStat.occupied}/{bStat.totalCapacity} Beds ({Math.round((bStat.occupied / (bStat.totalCapacity || 1)) * 100)}%)
+                      </span>
+                      {isCollapsed ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronUp className="w-4 h-4 text-slate-400" />}
+                    </div>
+                  </div>
+
+                  {!isCollapsed && (
+                    <>
+                      {/* Progress bar */}
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
                         <div 
                           className="bg-indigo-600 h-full rounded-full transition-all duration-300" 
                           style={{ width: `${bStat.totalCapacity ? (bStat.occupied / bStat.totalCapacity) * 100 : 0}%` }}
                         />
                       </div>
-                      <div className="flex justify-between text-[10px] text-slate-400 pt-1">
-                        <span>Total Rooms: <strong className="text-slate-700 dark:text-slate-300">{bStat.totalRooms}</strong></span>
-                        <span>Vacant Rooms: <strong className="text-emerald-600 dark:text-emerald-400">{bStat.fullyVacant}</strong></span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
 
-            {/* Dynamic Room Grid by Block */}
-            {HOSTEL_BLOCKS.map(blockName => {
-              const blockRooms = rooms.filter(r => normalizeBlockName(r.block) === blockName);
+                      {/* Room Cards Grid */}
+                      {blockRooms.length > 0 ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 pt-2">
+                          {blockRooms.map(rm => {
+                            const occupants = approvedStudents.filter(s => 
+                              normalizeBlockName(s.block) === blockName && 
+                              String(s.room_no || s.roomNo || '').trim() === String(rm.room_no).trim()
+                            );
+                            const capacity = parseInt(rm.seater, 10) || 1;
+                            const isFull = occupants.length >= capacity;
+                            const isEmpty = occupants.length === 0;
+                            const fillPercent = Math.min(100, (occupants.length / capacity) * 100);
 
-              return (
-                <div key={blockName} className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3`}>
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center space-x-2">
-                      <MapPin className="w-4 h-4 text-indigo-500" />
-                      <h3 className="font-bold text-base">{blockName}</h3>
-                    </div>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 font-semibold">
-                      {blockRooms.length} Configured Rooms
-                    </span>
-                  </div>
+                            return (
+                              <div
+                                key={rm.id}
+                                onClick={() => setSelectedRoom({ ...rm, occupants })}
+                                className={`p-3 rounded-xl border transition-all cursor-pointer hover:border-indigo-500 hover:scale-[1.02] active:scale-[0.98] flex flex-col justify-between ${
+                                  isFull 
+                                    ? 'bg-rose-50/70 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50' 
+                                    : isEmpty 
+                                    ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
+                                    : 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50'
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex justify-between items-start">
+                                    <span className="font-black text-xs text-indigo-600 dark:text-indigo-400">Rm {rm.room_no}</span>
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-900/80 border shadow-2xs">
+                                      {rm.seater}S
+                                    </span>
+                                  </div>
 
-                  {blockRooms.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                      {blockRooms.map(rm => {
-                        const occupants = approvedStudents.filter(s => 
-                          normalizeBlockName(s.block) === blockName && 
-                          String(s.room_no || s.roomNo || '').trim() === String(rm.room_no).trim()
-                        );
-                        const capacity = parseInt(rm.seater, 10) || 1;
-                        const isFull = occupants.length >= capacity;
-                        const isEmpty = occupants.length === 0;
+                                  <div className="mt-1.5 text-xs">
+                                    {occupants.length > 0 ? (
+                                      <p className="font-bold text-[11px] truncate">{formatShortName(occupants[0].name)}</p>
+                                    ) : (
+                                      <p className="font-bold text-[11px] text-emerald-600 dark:text-emerald-400">Vacant</p>
+                                    )}
+                                    {occupants.length > 1 && (
+                                      <p className="text-[9px] text-slate-400 font-medium">+ {occupants.length - 1} more</p>
+                                    )}
+                                  </div>
+                                </div>
 
-                        return (
-                          <div
-                            key={rm.id}
-                            onClick={() => setSelectedRoom({ ...rm, occupants })}
-                            className={`p-3 rounded-xl border transition cursor-pointer hover:border-indigo-500 ${
-                              isFull 
-                                ? 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900' 
-                                : isEmpty 
-                                ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900'
-                                : 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900'
-                            }`}
-                          >
-                            <div className="flex justify-between items-start">
-                              <span className="font-black text-sm text-indigo-600 dark:text-indigo-400">Rm {rm.room_no}</span>
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border shadow-sm">
-                                {rm.seater}-Seater
-                              </span>
-                            </div>
-
-                            <div className="mt-2 text-xs">
-                              <p className="font-bold truncate">{occupants.length > 0 ? occupants[0].name : 'Vacant'}</p>
-                              {occupants.length > 1 && <p className="text-[10px] text-slate-400">+ {occupants.length - 1} more</p>}
-                            </div>
-
-                            <div className="mt-2 flex justify-between items-center text-[9px] font-bold">
-                              <span className={isFull ? 'text-rose-600 dark:text-rose-400' : isEmpty ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
-                                {occupants.length} / {capacity} Occupied
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="p-6 text-center text-xs text-slate-400 italic">
-                      No rooms configured in {blockName}. Click "+ Add Room" or "Sync Repo JSON" above.
-                    </div>
+                                <div className="mt-2 space-y-1">
+                                  <div className="w-full bg-black/10 dark:bg-white/10 h-1 rounded-full overflow-hidden">
+                                    <div 
+                                      className={`h-full rounded-full ${isFull ? 'bg-rose-500' : isEmpty ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                      style={{ width: `${fillPercent}%` }}
+                                    />
+                                  </div>
+                                  <div className="flex justify-between items-center text-[9px] font-bold">
+                                    <span className={isFull ? 'text-rose-600 dark:text-rose-400' : isEmpty ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
+                                      {occupants.length}/{capacity} Occupied
+                                    </span>
+                                    <Eye className="w-3 h-3 text-slate-400" />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="p-6 text-center text-xs text-slate-400 italic">
+                          No matching rooms in {blockName}.
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               );
@@ -1390,29 +1609,29 @@ export default function App() {
 
         {/* VIEW 3: MASTER DIRECTORY */}
         {activeTab === 'directory' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
-          <div className="p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="p-4 sm:p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div>
-                <h2 className="text-xl font-bold tracking-tight">Master Resident Directory</h2>
-                <p className="text-xs text-slate-500">Filter and search residents by Block, Batch, Course, and Fee Status.</p>
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight">Master Resident Directory</h2>
+                <p className="text-xs text-slate-500">{filteredStudents.length} residents matching filters.</p>
               </div>
 
-              {sessionUser.role === 'admin' && (
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => loadJSONFromRepo(true)}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Sync Repo JSON</span>
-                  </button>
-                  <button
-                    onClick={handleExportJSON}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Export JSON</span>
-                  </button>
+              <div className="flex items-center space-x-2 w-full sm:w-auto">
+                {/* Mobile Filter Toggle Chip */}
+                <button
+                  onClick={() => setMobileFiltersOpen(true)}
+                  className="md:hidden flex-1 min-h-[44px] px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-slate-200 dark:border-slate-700"
+                >
+                  <Filter className="w-4 h-4 text-indigo-500" />
+                  <span>Filters</span>
+                  {activeFilterCount > 0 && (
+                    <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+
+                {sessionUser.role === 'admin' && (
                   <button
                     onClick={() => {
                       setEditingStudent({ 
@@ -1421,18 +1640,18 @@ export default function App() {
                       });
                       setIsEditStudentModalOpen(true);
                     }}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                    className="min-h-[44px] px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow flex items-center justify-center space-x-1.5 transition active:scale-95"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-4 h-4" />
                     <span>Register Resident</span>
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
-            {/* Filter Bar */}
-            <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3 text-xs`}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* Desktop Filter Bar (Hidden on Mobile) */}
+            <div className={`hidden md:block p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-3 text-xs`}>
+              <div className="grid grid-cols-5 gap-3">
                 <div>
                   <label className="font-bold text-slate-400 block mb-1">Search Resident</label>
                   <div className="relative">
@@ -1467,14 +1686,7 @@ export default function App() {
                     className={`w-full p-1.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                   >
                     <option value="ALL">All Batches</option>
-                    <option value="2019">2019</option>
-                    <option value="2020">2020</option>
-                    <option value="2021">2021</option>
-                    <option value="2022">2022</option>
-                    <option value="2023">2023</option>
-                    <option value="2024">2024</option>
-                    <option value="2025">2025</option>
-                    <option value="2026">2026</option>
+                    {['2019', '2020', '2021', '2022', '2023', '2024', '2025', '2026'].map(y => <option key={y} value={y}>{y}</option>)}
                   </select>
                 </div>
 
@@ -1508,8 +1720,65 @@ export default function App() {
               </div>
             </div>
 
-            {/* Resident Directory Table */}
-            <div className={`rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} overflow-x-auto shadow-sm`}>
+            {/* Mobile Card List (< md screen) */}
+            <div className="md:hidden space-y-3">
+              {filteredStudents.length > 0 ? (
+                filteredStudents.map(std => (
+                  <div
+                    key={std.id}
+                    onClick={() => { setSelectedStudent(std); setProfileModalTab('details'); }}
+                    className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} shadow-sm space-y-2.5 active:scale-[0.99] transition`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center font-black text-sm uppercase">
+                          {(std.name || 'A').charAt(0)}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-sm leading-tight text-slate-900 dark:text-slate-100">{std.name}</h3>
+                          <p className="text-[11px] text-slate-400 font-medium">{std.course} • Batch {std.batch}</p>
+                        </div>
+                      </div>
+
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        std.fee_status === 'Paid' 
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' 
+                          : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
+                      }`}>
+                        {std.fee_status || 'Pending'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                      <div className="font-bold text-indigo-600 dark:text-indigo-400">
+                        Room {std.room_no || std.roomNo || 'Unassigned'} • <span className="font-normal text-slate-500">{normalizeBlockName(std.block)}</span>
+                      </div>
+
+                      {std.phone ? (
+                        <a
+                          href={`tel:${std.phone}`}
+                          onClick={e => e.stopPropagation()}
+                          className="flex items-center space-x-1 text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg font-mono font-medium text-[11px]"
+                        >
+                          <Phone className="w-3 h-3 text-indigo-500" />
+                          <span>{std.phone}</span>
+                        </a>
+                      ) : (
+                        <span className="text-slate-400 text-[11px]">No Phone</span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="p-8 text-center text-xs text-slate-400 border border-dashed rounded-2xl space-y-2">
+                  <Users className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700" />
+                  <p>No resident records found.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Desktop Data Table (md+ screen) */}
+            <div className={`hidden md:block rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} overflow-x-auto shadow-sm`}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className={`border-b ${darkMode ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'} font-bold uppercase tracking-wider`}>
@@ -1564,7 +1833,7 @@ export default function App() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="8" className="p-8 text-center text-slate-400 italic">No resident records found. Click "Sync Repo JSON" or "+ Register Resident" to add entries.</td>
+                      <td colSpan="8" className="p-8 text-center text-slate-400 italic">No resident records found.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1575,19 +1844,19 @@ export default function App() {
 
         {/* VIEW 4: NOTICE BOARD */}
         {activeTab === 'notices' && (
-          <div className="p-6 max-w-4xl mx-auto space-y-4 w-full">
+          <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4 w-full">
             <div className="flex justify-between items-center">
               <div>
-                <h2 className="text-xl font-bold tracking-tight">Hostel Notice Board</h2>
-                <p className="text-xs text-slate-500">Official circulars, fee deadlines, and hostel announcements.</p>
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight">Hostel Notice Board</h2>
+                <p className="text-xs text-slate-500">Official circulars, fee deadlines, and announcements.</p>
               </div>
 
               {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
                 <button
                   onClick={() => setIsNoticeModalOpen(true)}
-                  className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                  className="min-h-[44px] px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow flex items-center space-x-1.5 transition active:scale-95"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
                   <span>Post Notice</span>
                 </button>
               )}
@@ -1599,7 +1868,11 @@ export default function App() {
                   <div key={not.id} className={`p-5 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} space-y-3 shadow-sm`}>
                     <div className="flex justify-between items-start">
                       <div>
-                        <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 rounded">
+                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                          not.priority === 'Urgent' || not.priority === 'Fee Notice'
+                            ? 'text-rose-600 bg-rose-50 dark:bg-rose-950'
+                            : 'text-amber-600 bg-amber-50 dark:bg-amber-950'
+                        }`}>
                           {not.priority}
                         </span>
                         <h3 className="font-bold text-base mt-1.5">{not.title}</h3>
@@ -1617,9 +1890,9 @@ export default function App() {
                           href={not.file_url}
                           target="_blank"
                           rel="noreferrer"
-                          className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold rounded-lg flex items-center space-x-1 hover:underline text-[11px]"
+                          className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold rounded-lg flex items-center space-x-1 hover:underline text-[11px]"
                         >
-                          <Paperclip className="w-3 h-3" />
+                          <Paperclip className="w-3.5 h-3.5" />
                           <span>{not.file_name || 'View Attachment'}</span>
                         </a>
                       )}
@@ -1628,8 +1901,17 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              <div className="p-12 text-center text-xs text-slate-400 italic border border-dashed rounded-2xl">
-                No notices available. Click "+ Post Notice" to publish one.
+              <div className="p-12 text-center text-xs text-slate-400 border border-dashed rounded-2xl space-y-3">
+                <Bell className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-700" />
+                <p className="font-medium">No notices published yet.</p>
+                {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+                  <button
+                    onClick={() => setIsNoticeModalOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
+                  >
+                    Publish First Notice
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1637,18 +1919,18 @@ export default function App() {
 
         {/* VIEW 5: COMPLAINTS DESK */}
         {activeTab === 'tickets' && (
-          <div className="p-6 max-w-4xl mx-auto space-y-4 w-full">
+          <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4 w-full">
             <div className="flex justify-between items-center">
               <div>
-                <h2 className="text-xl font-bold tracking-tight">Complaints & Student Queries Desk</h2>
-                <p className="text-xs text-slate-500">Publicly visible query board with official replies.</p>
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight">Complaints & Queries Desk</h2>
+                <p className="text-xs text-slate-500">Public query board with official responses.</p>
               </div>
 
               <button
                 onClick={() => setIsTicketModalOpen(true)}
-                className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold text-xs shadow flex items-center space-x-1"
+                className="min-h-[44px] px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow flex items-center space-x-1.5 transition active:scale-95"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-4 h-4" />
                 <span>Lodge Complaint</span>
               </button>
             </div>
@@ -1671,7 +1953,7 @@ export default function App() {
 
                       <div className="flex items-center space-x-2">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                          tkt.status === 'Resolved' ? 'bg-emerald-100 text-emerald-700' : tkt.status === 'In Progress' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                          tkt.status === 'Resolved' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' : tkt.status === 'In Progress' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400'
                         }`}>
                           {tkt.status}
                         </span>
@@ -1694,7 +1976,7 @@ export default function App() {
 
                     {/* Comments Thread */}
                     <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                      <h4 className="font-bold text-[11px] uppercase text-slate-400">Responses & Comments ({tkt.comments?.length || 0})</h4>
+                      <h4 className="font-bold text-[11px] uppercase text-slate-400">Responses ({tkt.comments?.length || 0})</h4>
 
                       {tkt.comments?.map((c, idx) => (
                         <div key={idx} className="p-2.5 rounded-xl bg-indigo-50/50 dark:bg-slate-900 text-xs space-y-0.5 border border-indigo-100 dark:border-slate-800">
@@ -1710,14 +1992,14 @@ export default function App() {
                         <div className="flex space-x-2 pt-1">
                           <input
                             type="text"
-                            placeholder="Write a comment..."
+                            placeholder="Write a reply..."
                             value={ticketCommentText[tkt.id] || ''}
                             onChange={e => setTicketCommentText({ ...ticketCommentText, [tkt.id]: e.target.value })}
                             className={`flex-1 p-2 text-xs rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                           />
                           <button
                             onClick={() => handleAddTicketComment(tkt.id)}
-                            className="px-3 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow"
+                            className="px-3.5 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow"
                           >
                             Reply
                           </button>
@@ -1728,8 +2010,15 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              <div className="p-12 text-center text-xs text-slate-400 italic border border-dashed rounded-2xl">
-                No active complaints or queries.
+              <div className="p-12 text-center text-xs text-slate-400 border border-dashed rounded-2xl space-y-3">
+                <MessageSquare className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-700" />
+                <p className="font-medium">No complaints or queries filed.</p>
+                <button
+                  onClick={() => setIsTicketModalOpen(true)}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
+                >
+                  Lodge Complaint
+                </button>
               </div>
             )}
           </div>
@@ -1737,20 +2026,20 @@ export default function App() {
 
         {/* VIEW 6: HOSTEL MAP */}
         {activeTab === 'map' && (
-          <div className="p-6 space-y-4 max-w-5xl mx-auto w-full">
+          <div className="p-4 sm:p-6 space-y-4 max-w-5xl mx-auto w-full">
             <div className="flex justify-between items-center">
               <div>
-                <h2 className="text-xl font-bold tracking-tight">Hostel Floor Plan & Layout Map</h2>
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight">Hostel Floor Plan & Layout Map</h2>
                 <p className="text-xs text-slate-500">Visual layout reference for hostel blocks.</p>
               </div>
 
               {sessionUser.role === 'admin' && (
                 <button
                   onClick={() => setIsMapModalOpen(true)}
-                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow flex items-center space-x-1.5"
+                  className="min-h-[44px] px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow flex items-center space-x-1.5"
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Upload / Change Map</span>
+                  <span>Upload Map</span>
                 </button>
               )}
             </div>
@@ -1768,8 +2057,8 @@ export default function App() {
                   <h3 className="font-bold text-sm">No Hostel Map Uploaded</h3>
                   <p className="text-xs text-slate-400 max-w-xs mx-auto">
                     {sessionUser.role === 'admin' 
-                      ? 'Click "Upload / Change Map" above to attach a floor plan image or URL.' 
-                      : 'The admin has not uploaded a floor layout map yet.'}
+                      ? 'Click "Upload Map" above to attach a floor layout image.' 
+                      : 'The hostel admin has not uploaded a floor plan yet.'}
                   </p>
                 </div>
               )}
@@ -1779,8 +2068,8 @@ export default function App() {
 
         {/* VIEW 7: APPROVAL DESK */}
         {activeTab === 'approval' && sessionUser.role === 'admin' && (
-          <div className="p-6 max-w-4xl mx-auto space-y-4 w-full">
-            <h2 className="text-xl font-bold">Pending Registrations</h2>
+          <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4 w-full">
+            <h2 className="text-lg sm:text-xl font-bold">Pending Registrations</h2>
             <div className="space-y-3">
               {pendingStudents.length > 0 ? (
                 pendingStudents.map(user => (
@@ -1791,7 +2080,7 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'resident' } : s))}
-                      className="px-3 py-1 bg-emerald-600 text-white font-bold text-xs rounded-lg shadow"
+                      className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow"
                     >
                       Approve Resident
                     </button>
@@ -1806,7 +2095,181 @@ export default function App() {
 
       </main>
 
-      {/* MODAL 1: MAP UPLOAD MODAL */}
+      {/* --- MODALS & BOTTOM SHEETS --- */}
+
+      {/* ADMIN TOOLS & DATA MODAL / BOTTOM SHEET */}
+      {isAdminToolsOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className={`w-full max-w-md rounded-t-3xl sm:rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200`}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h3 className="font-bold text-base flex items-center space-x-2">
+                  <Settings className="w-4 h-4 text-indigo-500" />
+                  <span>Admin Data Tools</span>
+                </h3>
+                {lastSynced && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">Last synced from repo: {lastSynced}</p>
+                )}
+              </div>
+              <button onClick={() => setIsAdminToolsOpen(false)} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 pt-1">
+              <button
+                onClick={() => {
+                  loadJSONFromRepo(true);
+                  setIsAdminToolsOpen(false);
+                }}
+                disabled={isFetchingJson}
+                className="w-full min-h-[44px] py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow transition"
+              >
+                <RefreshCw className={`w-4 h-4 ${isFetchingJson ? 'animate-spin' : ''}`} />
+                <span>{isFetchingJson ? 'Fetching JSON...' : 'Sync Repo JSON'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  handleExportJSON();
+                  setIsAdminToolsOpen(false);
+                }}
+                className="w-full min-h-[44px] py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow transition"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export JSON Register File</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  fileInputRef.current?.click();
+                  setIsAdminToolsOpen(false);
+                }}
+                className="w-full min-h-[44px] py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow transition"
+              >
+                <FileJson className="w-4 h-4" />
+                <span>Upload Local JSON</span>
+              </button>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={handleLogout}
+                  className="w-full min-h-[44px] py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 transition"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MOBILE MASTER DIRECTORY FILTERS MODAL / BOTTOM SHEET */}
+      {mobileFiltersOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end justify-center p-0">
+          <div className={`w-full rounded-t-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border-t p-6 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto`}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="font-bold text-base flex items-center space-x-2">
+                <Filter className="w-4 h-4 text-indigo-500" />
+                <span>Filter Residents</span>
+              </h3>
+              <button onClick={() => setMobileFiltersOpen(false)}><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold text-slate-400 block mb-1">Search Resident</label>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Name, room, phone..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className={`w-full pl-8 pr-3 py-2 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-400 block mb-1">Block</label>
+                <select
+                  value={filterBlock}
+                  onChange={e => setFilterBlock(e.target.value)}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                >
+                  <option value="ALL">All Blocks</option>
+                  {HOSTEL_BLOCKS.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-400 block mb-1">Batch</label>
+                <select
+                  value={filterBatch}
+                  onChange={e => setFilterBatch(e.target.value)}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                >
+                  <option value="ALL">All Batches</option>
+                  {['2019', '2020', '2021', '2022', '2023', '2024', '2025', '2026'].map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-400 block mb-1">Course</label>
+                <select
+                  value={filterCourse}
+                  onChange={e => setFilterCourse(e.target.value)}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                >
+                  <option value="ALL">All Courses</option>
+                  <option value="MBBS">MBBS</option>
+                  <option value="BDS">BDS</option>
+                  <option value="MD/MS">MD/MS</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-400 block mb-1">Fee Status</label>
+                <select
+                  value={filterFeeStatus}
+                  onChange={e => setFilterFeeStatus(e.target.value)}
+                  className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="Paid">Paid</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Partial">Partial</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between gap-2">
+              <button
+                onClick={() => {
+                  setFilterBlock('ALL');
+                  setFilterBatch('ALL');
+                  setFilterCourse('ALL');
+                  setFilterFeeStatus('ALL');
+                  setSearchQuery('');
+                }}
+                className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl text-xs"
+              >
+                Reset Filters
+              </button>
+              <button
+                onClick={() => setMobileFiltersOpen(false)}
+                className="flex-1 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow"
+              >
+                Apply Filters
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MAP UPLOAD MODAL */}
       {isMapModalOpen && sessionUser.role === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
@@ -1843,7 +2306,7 @@ export default function App() {
                     className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`}
                   />
                 </div>
-                <button type="submit" className="w-full py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow">
+                <button type="submit" className="w-full min-h-[44px] py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow">
                   Save Image URL
                 </button>
               </form>
@@ -1852,7 +2315,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 2: ADD ROOM CONFIGURATION MODAL */}
+      {/* ADD ROOM CONFIGURATION MODAL */}
       {isAddRoomModalOpen && sessionUser.role === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={handleAddRoom} className={`w-full max-w-md rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
@@ -1901,7 +2364,7 @@ export default function App() {
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button type="submit" className="px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
+              <button type="submit" className="min-h-[44px] px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
                 Save Room
               </button>
             </div>
@@ -1909,40 +2372,40 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 3: RESIDENT PROFILE */}
+      {/* RESIDENT PROFILE MODAL */}
       {selectedStudent && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className={`w-full max-w-2xl rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-5 shadow-2xl my-8`}>
             
             <div className="flex justify-between items-start pb-3 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center space-x-4">
-                <div className="w-14 h-14 bg-indigo-600 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-md uppercase">
+                <div className="w-12 h-12 sm:w-14 sm:h-14 bg-indigo-600 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-md uppercase">
                   {(selectedStudent.name || 'A').charAt(0)}
                 </div>
                 <div>
-                  <h3 className="font-bold text-lg leading-tight">{selectedStudent.name}</h3>
+                  <h3 className="font-bold text-base sm:text-lg leading-tight">{selectedStudent.name}</h3>
                   <p className="text-xs text-slate-400 mt-0.5">{selectedStudent.course} • Batch {selectedStudent.batch} • Roll: {selectedStudent.roll_no || 'N/A'}</p>
                 </div>
               </div>
               <button onClick={() => setSelectedStudent(null)}><X className="w-5 h-5" /></button>
             </div>
 
-            <div className="flex space-x-2 border-b border-slate-200 dark:border-slate-800 pb-2 text-xs">
+            <div className="flex space-x-2 border-b border-slate-200 dark:border-slate-800 pb-2 text-xs overflow-x-auto">
               <button 
                 onClick={() => setProfileModalTab('details')}
-                className={`px-3 py-1.5 rounded-xl font-bold transition ${profileModalTab === 'details' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                className={`px-3 py-1.5 rounded-xl font-bold transition whitespace-nowrap ${profileModalTab === 'details' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
               >
                 Resident Details
               </button>
               <button 
                 onClick={() => setProfileModalTab('fee')}
-                className={`px-3 py-1.5 rounded-xl font-bold transition ${profileModalTab === 'fee' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                className={`px-3 py-1.5 rounded-xl font-bold transition whitespace-nowrap ${profileModalTab === 'fee' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
               >
                 Year-Wise Fee Ledger
               </button>
               <button 
                 onClick={() => setProfileModalTab('history')}
-                className={`px-3 py-1.5 rounded-xl font-bold transition ${profileModalTab === 'history' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                className={`px-3 py-1.5 rounded-xl font-bold transition whitespace-nowrap ${profileModalTab === 'history' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
               >
                 Room Movement History
               </button>
@@ -1960,7 +2423,7 @@ export default function App() {
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
                   <span className="text-slate-400 block font-medium">Phone Number</span>
-                  <span className="font-bold">{selectedStudent.phone || 'N/A'}</span>
+                  <span className="font-bold font-mono">{selectedStudent.phone || 'N/A'}</span>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
                   <span className="text-slate-400 block font-medium">Father's Name</span>
@@ -2027,7 +2490,7 @@ export default function App() {
             )}
 
             {sessionUser.role === 'admin' && (
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between">
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between gap-2">
                 <button
                   onClick={() => {
                     setTransferData({ 
@@ -2060,7 +2523,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 4: ROOM INSPECTOR & MANAGEMENT */}
+      {/* ROOM INSPECTOR MODAL */}
       {selectedRoom && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
@@ -2081,7 +2544,7 @@ export default function App() {
                       <p className="font-bold">{std.name}</p>
                       <p className="text-[10px] text-slate-400">{std.course} • Batch {std.batch}</p>
                     </div>
-                    <button onClick={() => { setSelectedStudent(std); setSelectedRoom(null); }} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded">
+                    <button onClick={() => { setSelectedStudent(std); setSelectedRoom(null); }} className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg">
                       <Eye className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                     </button>
                   </div>
@@ -2106,7 +2569,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 5: DIRECT ROOM SHIFT */}
+      {/* DIRECT ROOM SHIFT MODAL */}
       {isTransferModalOpen && sessionUser.role === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={handleExecuteTransfer} className={`w-full max-w-md rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
@@ -2174,7 +2637,7 @@ export default function App() {
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button type="submit" className="px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
+              <button type="submit" className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
                 Confirm Room Shift
               </button>
             </div>
@@ -2182,7 +2645,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 6: CREATE NOTICE */}
+      {/* CREATE NOTICE MODAL */}
       {isNoticeModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={handleCreateNotice} className={`w-full max-w-md rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl`}>
@@ -2243,7 +2706,7 @@ export default function App() {
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button type="submit" className="px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
+              <button type="submit" className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
                 Post Notice
               </button>
             </div>
@@ -2251,7 +2714,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 7: LODGE COMPLAINT */}
+      {/* LODGE COMPLAINT MODAL */}
       {isTicketModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form onSubmit={(e) => {
@@ -2319,7 +2782,7 @@ export default function App() {
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
-              <button type="submit" className="px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
+              <button type="submit" className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
                 Submit Ticket
               </button>
             </div>
@@ -2327,7 +2790,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 8: EDIT STUDENT FORM */}
+      {/* EDIT STUDENT FORM MODAL */}
       {isEditStudentModalOpen && editingStudent && sessionUser.role === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form onSubmit={handleSaveStudent} className={`w-full max-w-lg rounded-3xl ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white text-slate-800'} border p-6 space-y-4 shadow-2xl my-8`}>
@@ -2460,7 +2923,7 @@ export default function App() {
             </div>
 
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end">
-              <button type="submit" className="px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
+              <button type="submit" className="min-h-[44px] px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow">
                 Save Record
               </button>
             </div>
