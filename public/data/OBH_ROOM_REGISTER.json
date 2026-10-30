@@ -19,6 +19,16 @@
   },
   {
     "Block": "NCC Block",
+    "Room No": "3",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
     "Room No": "4",
     "BATCH": "2023",
     "seater": "4",
@@ -29,12 +39,93 @@
   },
   {
     "Block": "NCC Block",
+    "Room No": "5",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
+    "Room No": "6",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
+    "Room No": "7",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
     "Room No": "8",
     "BATCH": "2023",
-    "seater": "3",
+    "seater": "4",
     "Occupant 1": "Anurag Meena",
     "Occupant 2": "Benjamin",
-    "Occupant 3": "Ronanki Tarun kumar"
+    "Occupant 3": "Ronanki Tarun kumar",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "9",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "10",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "11",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "12",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "13",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
   },
   {
     "Block": "Office Block",
@@ -48,6 +139,16 @@
   },
   {
     "Block": "Office Block",
+    "Room No": "15",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
     "Room No": "16",
     "BATCH": "2023",
     "seater": "4",
@@ -55,6 +156,16 @@
     "Occupant 2": "Vikram",
     "Occupant 3": "Shivam Kumar",
     "Occupant 4": "Piyush"
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "17",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
   },
   {
     "Block": "Mathura (North)",
@@ -466,6 +577,13 @@
   },
   {
     "Block": "PG Block",
+    "Room No": "76",
+    "BATCH": "",
+    "seater": "1",
+    "Occupant 1": ""
+  },
+  {
+    "Block": "PG Block",
     "Room No": "77",
     "BATCH": "2022",
     "seater": "1",
@@ -551,21 +669,113 @@
   },
   {
     "Block": "Office Block",
+    "Room No": "89",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "90",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "91",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "92",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "93",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "94",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "95",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "96",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "97",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
     "Room No": "98",
     "BATCH": "2022",
-    "seater": "3",
+    "seater": "4",
     "Occupant 1": "ANEEK SINGHAL",
     "Occupant 2": "AJITESH SINGH RANA",
-    "Occupant 3": "SPARSH CHATURVEDI"
+    "Occupant 3": "SPARSH CHATURVEDI",
+    "Occupant 4": ""
   },
   {
     "Block": "Office Block",
     "Room No": "99",
     "BATCH": "2022",
-    "seater": "3",
+    "seater": "4",
     "Occupant 1": "MD.ZAID",
     "Occupant 2": "ARSH KUMAR",
-    "Occupant 3": "Shashank angiras"
+    "Occupant 3": "Shashank angiras",
+    "Occupant 4": ""
   },
   {
     "Block": "Office Block",
@@ -581,10 +791,11 @@
     "Block": "Office Block",
     "Room No": "101",
     "BATCH": "2022",
-    "seater": "3",
+    "seater": "4",
     "Occupant 1": "Anchit chauhan",
     "Occupant 2": "Harshraj Singh",
-    "Occupant 3": "Ojas Vaishkiar"
+    "Occupant 3": "Ojas Vaishkiar",
+    "Occupant 4": ""
   },
   {
     "Block": "Office Block",
@@ -610,10 +821,11 @@
     "Block": "Office Block",
     "Room No": "104",
     "BATCH": "2022",
-    "seater": "3",
+    "seater": "4",
     "Occupant 1": "Dhruv Setia",
     "Occupant 2": "Yashik Yadav",
-    "Occupant 3": "Kshitiz Khetan"
+    "Occupant 3": "Kshitiz Khetan",
+    "Occupant 4": ""
   },
   {
     "Block": "Mathura (North)",
@@ -1139,10 +1351,11 @@
     "Block": "NCC Block",
     "Room No": "178",
     "BATCH": "2022",
-    "seater": "3",
+    "seater": "4",
     "Occupant 1": "Md Tauqeer Minhaz",
     "Occupant 2": "Aman Yadav",
-    "Occupant 3": "Kislay Kumar"
+    "Occupant 3": "Kislay Kumar",
+    "Occupant 4": ""
   },
   {
     "Block": "NCC Block",
@@ -1176,12 +1389,33 @@
   },
   {
     "Block": "NCC Block",
+    "Room No": "182",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
     "Room No": "183",
     "BATCH": "2022",
-    "seater": "3",
+    "seater": "4",
     "Occupant 1": "Apurva Ranjan",
     "Occupant 2": "Priyansh Patre",
-    "Occupant 3": "Harshit Raj"
+    "Occupant 3": "Harshit Raj",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "184",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
   },
   {
     "Block": "Office Block",
@@ -1192,6 +1426,36 @@
     "Occupant 2": "Devanshu Kumar",
     "Occupant 3": "Aryan",
     "Occupant 4": "Deepanshu"
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "186",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "187",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "188",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
   },
   {
     "Block": "Office Block",
@@ -1212,6 +1476,16 @@
     "Occupant 2": "Ayush Agarwal",
     "Occupant 3": "Lakshya Singh",
     "Occupant 4": "Anish Kumar Yadav"
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "191",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
   },
   {
     "Block": "Mathura (North)",
@@ -1715,6 +1989,46 @@
   },
   {
     "Block": "NCC Block",
+    "Room No": "263",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
+    "Room No": "264",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
+    "Room No": "265",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
+    "Room No": "266",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "NCC Block",
     "Room No": "267",
     "BATCH": "2022",
     "seater": "4",
@@ -1727,10 +2041,11 @@
     "Block": "NCC Block",
     "Room No": "268",
     "BATCH": "2022",
-    "seater": "3",
+    "seater": "4",
     "Occupant 1": "Shivansh Dutt Verma",
     "Occupant 2": "Mukesh Kumar",
-    "Occupant 3": "Siddharth Singh Rabade"
+    "Occupant 3": "Siddharth Singh Rabade",
+    "Occupant 4": ""
   },
   {
     "Block": "NCC Block",
@@ -1762,6 +2077,26 @@
   },
   {
     "Block": "Office Block",
+    "Room No": "272",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "273",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
     "Room No": "274",
     "BATCH": "2023",
     "seater": "4",
@@ -1776,6 +2111,36 @@
     "BATCH": "2021",
     "seater": "1",
     "Occupant 1": "Jashith Goel"
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "276",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "277",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
+  },
+  {
+    "Block": "Office Block",
+    "Room No": "278",
+    "BATCH": "",
+    "seater": "4",
+    "Occupant 1": "",
+    "Occupant 2": "",
+    "Occupant 3": "",
+    "Occupant 4": ""
   },
   {
     "Block": "Tennis Block",
