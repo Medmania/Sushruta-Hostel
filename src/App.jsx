@@ -5,7 +5,7 @@ import {
   BedDouble, Wrench, Clock, Edit, MapPin, 
   Moon, Sun, Sparkles, X, Eye, 
   Upload, Database, Copy, Settings, LogOut, Lock, Mail,
-  Map, Image as ImageIcon, Trash2, Calendar, CreditCard, Phone, User, FileText, CheckCircle, AlertCircle,
+  Map as MapIcon, Image as ImageIcon, Trash2, Calendar, CreditCard, Phone, User, FileText, CheckCircle, AlertCircle,
   Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson, Download, RefreshCw
 } from 'lucide-react';
 
@@ -1074,7 +1074,7 @@ export default function App() {
               onClick={() => setActiveTab('map')}
               className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all ${activeTab === 'map' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
             >
-              <Map className="w-4 h-4" />
+              <MapIcon className="w-4 h-4" />
               <span>Hostel Map</span>
             </button>
 
