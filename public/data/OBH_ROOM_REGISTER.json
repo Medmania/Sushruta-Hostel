@@ -78,7 +78,7 @@
     "Occupant 4": ""
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "9",
     "BATCH": "",
     "seater": "4",
@@ -668,7 +668,7 @@
     "Occupant 2": "Rahul Kumar (BDS)"
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "89",
     "BATCH": "",
     "seater": "4",
@@ -678,7 +678,7 @@
     "Occupant 4": ""
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "90",
     "BATCH": "",
     "seater": "4",
@@ -688,7 +688,7 @@
     "Occupant 4": ""
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "91",
     "BATCH": "",
     "seater": "4",
@@ -698,7 +698,7 @@
     "Occupant 4": ""
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "92",
     "BATCH": "",
     "seater": "4",
@@ -708,7 +708,7 @@
     "Occupant 4": ""
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "93",
     "BATCH": "",
     "seater": "4",
@@ -718,7 +718,7 @@
     "Occupant 4": ""
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "94",
     "BATCH": "",
     "seater": "4",
@@ -728,7 +728,7 @@
     "Occupant 4": ""
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "95",
     "BATCH": "",
     "seater": "4",
@@ -738,7 +738,7 @@
     "Occupant 4": ""
   },
   {
-    "Block": "Office Block",
+    "Block": "NCC Block",
     "Room No": "96",
     "BATCH": "",
     "seater": "4",
@@ -1756,9 +1756,9 @@
   {
     "Block": "Tennis Block",
     "Room No": "230",
-    "BATCH": "2021",
+    "BATCH": "2020",
     "seater": "1",
-    "Occupant 1": "Ankit Raj"
+    "Occupant 1": "Aditya Singh"
   },
   {
     "Block": "Tennis Block",
