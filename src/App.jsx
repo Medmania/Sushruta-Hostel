@@ -252,7 +252,7 @@ export default function App() {
     // Inject Dynamic Manifest
     const manifestObj = {
       name: "OBH Hostel Portal",
-      short_name: "OBH Portal",
+      short_name: "SUSHRUTA HOSTEL",
       description: "Hostel Management System for Resident Allotment, Notices & Complaints",
       start_url: "/",
       display: "standalone",
@@ -1339,7 +1339,7 @@ export default function App() {
             <AppLogoIcon className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="font-extrabold text-sm leading-tight">OBH PORTAL</h1>
+            <h1 className="font-extrabold text-sm leading-tight">SUSHRUTA HOSTEL</h1>
             <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider">{getTabTitle(activeTab)}</p>
           </div>
         </div>
@@ -1391,7 +1391,7 @@ export default function App() {
                 <AppLogoIcon className="w-5 h-5" />
               </div>
               <div>
-                <h1 className="font-extrabold text-base leading-tight tracking-wide">OBH PORTAL</h1>
+                <h1 className="font-extrabold text-base leading-tight tracking-wide">SUSHRUTA HOSTEL</h1>
                 <p className="text-[10px] text-indigo-500 font-bold tracking-widest uppercase">Hostel Management</p>
               </div>
             </div>
