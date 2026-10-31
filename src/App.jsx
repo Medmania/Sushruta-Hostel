@@ -160,7 +160,6 @@ export default function App() {
   });
 
   const [hostelMapUrl, setHostelMapUrl] = useState(() => localStorage.getItem('obh_hostel_map_v3') || '');
-  const [mapZoomLevel, setMapZoomLevel] = useState(1);
 
   // Modal Control States
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -525,9 +524,136 @@ export default function App() {
     downloadAnchor.remove();
   };
 
+  // --- SUPABASE PROFILES FETCH & SYNC LOGIC ---
+  const fetchProfiles = async () => {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from('profiles').select('*');
+      if (error) {
+        console.error('Error fetching profiles from Supabase:', error);
+        return;
+      }
+      if (data && data.length > 0) {
+        const formatted = data.map(p => ({
+          ...p,
+          block: normalizeBlockName(p.block)
+        }));
+        setStudents(formatted);
+      }
+    } catch (err) {
+      console.error('Fetch profiles error:', err);
+    }
+  };
+
+  const syncUserProfile = async (authUser) => {
+    if (!authUser) return;
+    const userEmail = authUser.email ? authUser.email.toLowerCase() : '';
+    const isAdminUser = ADMIN_EMAILS.includes(userEmail);
+
+    if (!supabase) {
+      const existing = studentsRef.current.find(s => s.email?.toLowerCase() === userEmail);
+      let profile;
+      if (existing) {
+        profile = {
+          ...existing,
+          block: normalizeBlockName(existing.block),
+          role: isAdminUser ? 'admin' : (existing.role || 'resident'),
+          status: isAdminUser ? 'approved' : (existing.status || 'approved')
+        };
+      } else {
+        profile = {
+          id: authUser.id || 'usr_' + Date.now(),
+          email: authUser.email,
+          name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
+          role: isAdminUser ? 'admin' : 'resident',
+          status: isAdminUser ? 'approved' : 'pending',
+          course: 'MBBS',
+          batch: '2023',
+          roll_no: '',
+          block: 'Office Block',
+          room_no: 'Unassigned',
+          phone: '',
+          father_name: '',
+          address: '',
+          joining_date: new Date().toISOString().split('T')[0],
+          fee_status: 'Pending',
+          fee_ledger: [],
+          history: []
+        };
+      }
+      setSessionUser(profile);
+      return;
+    }
+
+    try {
+      // 1. Check if profile already exists in Supabase
+      const { data: existingProfile, error: fetchErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .or(`id.eq.${authUser.id},email.eq.${userEmail}`)
+        .maybeSingle();
+
+      if (fetchErr && fetchErr.code !== 'PGRST116') {
+        console.error('Error checking profile in Supabase:', fetchErr);
+      }
+
+      let profile;
+      if (existingProfile) {
+        profile = {
+          ...existingProfile,
+          block: normalizeBlockName(existingProfile.block)
+        };
+      } else {
+        // 2. Insert new profile into Supabase
+        const newProfile = {
+          id: authUser.id,
+          email: authUser.email,
+          name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
+          role: isAdminUser ? 'admin' : 'resident',
+          status: isAdminUser ? 'approved' : 'pending',
+          course: 'MBBS',
+          batch: '2023',
+          roll_no: '',
+          block: 'Office Block',
+          room_no: 'Unassigned',
+          phone: '',
+          father_name: '',
+          address: '',
+          joining_date: new Date().toISOString().split('T')[0],
+          fee_status: 'Pending',
+          fee_ledger: [],
+          history: []
+        };
+
+        const { data: insertedData, error: insertErr } = await supabase
+          .from('profiles')
+          .insert([newProfile])
+          .select()
+          .single();
+
+        if (insertErr) {
+          console.error('Error inserting profile into Supabase:', insertErr);
+          profile = newProfile;
+        } else {
+          profile = insertedData;
+        }
+      }
+
+      // 3. Always set sessionUser from Supabase profile data
+      setSessionUser(profile);
+
+      // Fetch all profiles to update global students list
+      await fetchProfiles();
+    } catch (err) {
+      console.error('syncUserProfile exception:', err);
+    }
+  };
+
   // Auth Listener
   useEffect(() => {
     if (!supabase) return;
+
+    fetchProfiles();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) syncUserProfile(session.user);
@@ -540,54 +666,6 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, [supabase]);
-
-  const syncUserProfile = (authUser) => {
-    const userEmail = authUser.email ? authUser.email.toLowerCase() : '';
-    const isAdminUser = ADMIN_EMAILS.includes(userEmail);
-    const existing = studentsRef.current.find(s => s.email?.toLowerCase() === userEmail);
-
-    let profile;
-    if (existing) {
-      profile = {
-        ...existing,
-        block: normalizeBlockName(existing.block),
-        role: isAdminUser ? 'admin' : existing.role || 'resident',
-        status: isAdminUser ? 'approved' : existing.status || 'approved'
-      };
-    } else {
-      profile = {
-        id: authUser.id || 'usr_' + Date.now(),
-        email: authUser.email,
-        name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
-        role: isAdminUser ? 'admin' : 'resident',
-        status: isAdminUser ? 'approved' : 'pending',
-        course: 'MBBS',
-        batch: '2023',
-        roll_no: '',
-        block: 'Office Block',
-        room_no: 'Unassigned',
-        phone: '',
-        father_name: '',
-        address: '',
-        joining_date: new Date().toISOString().split('T')[0],
-        fee_status: 'Pending',
-        fee_ledger: [],
-        history: []
-      };
-    }
-
-    setSessionUser(profile);
-
-    setStudents(prev => {
-      const idx = prev.findIndex(s => s.email?.toLowerCase() === userEmail);
-      if (idx !== -1) {
-        const updated = [...prev];
-        updated[idx] = { ...updated[idx], block: profile.block, role: profile.role, status: profile.status };
-        return updated;
-      }
-      return [...prev, profile];
-    });
-  };
 
   const handleEmailAuth = async (e) => {
     e.preventDefault();
@@ -820,7 +898,7 @@ export default function App() {
   }, [selectedStudent]);
 
   // FEE LEDGER EDIT HANDLERS
-  const handleSaveFeeEntry = (e) => {
+  const handleSaveFeeEntry = async (e) => {
     e.preventDefault();
     if (!selectedStudent) return;
     if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
@@ -856,12 +934,16 @@ export default function App() {
       fee_ledger: updatedLedger
     };
 
+    if (supabase) {
+      await supabase.from('profiles').update({ fee_status: overallFeeStatus, fee_ledger: updatedLedger }).eq('id', selectedStudent.id);
+    }
+
     setStudents(prev => prev.map(s => s.id === selectedStudent.id ? updatedStudent : s));
     setSelectedStudent(updatedStudent);
     setEditingFeeEntry(null);
   };
 
-  const handleDeleteFeeEntry = (index) => {
+  const handleDeleteFeeEntry = async (index) => {
     if (!selectedStudent) return;
     if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
 
@@ -880,13 +962,17 @@ export default function App() {
         fee_ledger: updatedLedger
       };
 
+      if (supabase) {
+        await supabase.from('profiles').update({ fee_status: overallFeeStatus, fee_ledger: updatedLedger }).eq('id', selectedStudent.id);
+      }
+
       setStudents(prev => prev.map(s => s.id === selectedStudent.id ? updatedStudent : s));
       setSelectedStudent(updatedStudent);
     }
   };
 
   // DELETE RESIDENT HANDLER
-  const handleDeleteResident = (studentToDelete) => {
+  const handleDeleteResident = async (studentToDelete) => {
     if (!studentToDelete) return;
     if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
 
@@ -895,6 +981,9 @@ export default function App() {
     );
 
     if (confirmed) {
+      if (supabase) {
+        await supabase.from('profiles').delete().eq('id', studentToDelete.id);
+      }
       setStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
       setSelectedStudent(null);
       alert(`Resident "${studentToDelete.name}" has been permanently deleted.`);
@@ -960,7 +1049,7 @@ export default function App() {
   };
 
   // Save Resident
-  const handleSaveStudent = (e) => {
+  const handleSaveStudent = async (e) => {
     e.preventDefault();
     if (sessionUser?.role !== 'admin' && sessionUser?.role !== 'authorized') return alert('Access Denied');
 
@@ -981,6 +1070,9 @@ export default function App() {
     }
 
     if (updatedRecord.id) {
+      if (supabase) {
+        await supabase.from('profiles').update(updatedRecord).eq('id', updatedRecord.id);
+      }
       setStudents(prev => prev.map(s => s.id === updatedRecord.id ? updatedRecord : s));
     } else {
       const newEntry = {
@@ -998,6 +1090,9 @@ export default function App() {
           reason: 'Initial Registration'
         }]
       };
+      if (supabase) {
+        await supabase.from('profiles').insert([newEntry]);
+      }
       setStudents(prev => [...prev, newEntry]);
     }
 
@@ -1007,7 +1102,7 @@ export default function App() {
   };
 
   // Direct Room Shifting
-  const handleExecuteTransfer = (e) => {
+  const handleExecuteTransfer = async (e) => {
     e.preventDefault();
     if (sessionUser?.role !== 'admin') return alert('Admin access required.');
 
@@ -1044,16 +1139,65 @@ export default function App() {
       history: [historyRecord, ...(student.history || [])]
     };
 
+    if (supabase) {
+      await supabase.from('profiles').update({
+        room_no: transferData.targetRoom,
+        block: targetBlock,
+        joining_date: transferData.transferDate,
+        history: updatedStudent.history
+      }).eq('id', student.id);
+    }
+
     setStudents(prev => prev.map(s => s.id === student.id ? updatedStudent : s));
     setIsTransferModalOpen(false);
     if (selectedStudent?.id === student.id) setSelectedStudent(updatedStudent);
   };
 
-  // Linking Pending User
-  const handleConfirmLink = (pendingUser, existingResident) => {
-    if (!pendingUser || !existingResident) return;
+  // --- APPROVAL DESK FUNCTIONS (SUPABASE SYNCED) ---
+  const handleApproveUser = async (userToApprove) => {
+    if (!userToApprove) return;
 
+    if (supabase) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ status: 'approved', role: userToApprove.role || 'resident' })
+        .eq('id', userToApprove.id);
+
+      if (error) {
+        console.error('Error approving user in Supabase:', error);
+        alert('Failed to update Supabase record: ' + error.message);
+        return;
+      }
+    }
+
+    setStudents(prev => prev.map(s => s.id === userToApprove.id ? { ...s, status: 'approved', role: 'resident' } : s));
+    if (sessionUser?.id === userToApprove.id) {
+      setSessionUser(prev => prev ? { ...prev, status: 'approved' } : null);
+    }
+    alert(`User ${userToApprove.name || userToApprove.email} has been approved.`);
+  };
+
+  const handleConfirmLink = async (pendingUser, existingResident) => {
+    if (!pendingUser || !existingResident) return;
     const targetEmail = pendingUser.email;
+
+    if (supabase) {
+      const { error: updateErr } = await supabase
+        .from('profiles')
+        .update({ email: targetEmail, status: 'approved' })
+        .eq('id', existingResident.id);
+
+      if (updateErr) {
+        console.error('Error updating existing profile in Supabase:', updateErr);
+      }
+
+      if (pendingUser.id !== existingResident.id) {
+        await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', pendingUser.id);
+      }
+    }
 
     setStudents(prev => {
       const filtered = prev.filter(s => s.id !== pendingUser.id);
@@ -1512,6 +1656,21 @@ export default function App() {
           <MessageSquare className="w-4 h-4" />
           <span className="text-[9px] mt-1 font-medium">Complaints</span>
         </button>
+
+        {(sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
+          <button
+            onClick={() => setActiveTab('approval')}
+            className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all relative ${activeTab === 'approval' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-slate-500 dark:text-slate-400'}`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span className="text-[9px] mt-1 font-medium">Approval</span>
+            {pendingStudents.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow">
+                {pendingStudents.length}
+              </span>
+            )}
+          </button>
+        )}
       </nav>
 
       {/* MAIN VIEW CONTAINER */}
@@ -1622,7 +1781,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: IMPROVED ROOM GRID & VACANCY DASHBOARD */}
+        {/* VIEW 2: ROOM GRID & VACANCY DASHBOARD */}
         {activeTab === 'grid' && (sessionUser.role === 'admin' || sessionUser.role === 'authorized') && (
           <div className="p-4 sm:p-6 space-y-5">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -2432,7 +2591,7 @@ export default function App() {
                         <span>Link to Existing Resident</span>
                       </button>
                       <button
-                        onClick={() => setStudents(prev => prev.map(s => s.id === user.id ? { ...s, status: 'approved', role: 'resident' } : s))}
+                        onClick={() => handleApproveUser(user)}
                         className="flex-1 sm:flex-none px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow transition"
                       >
                         Approve as New Resident
