@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
 };
 
 const HOSTEL_BLOCKS = ['NCC Block', 'Office Block', 'Mathura (North)', 'Mathura (South)', 'Tennis Block', 'PG Block'];
-const ADMIN_EMAILS = ['dr.ankitraj8558@gmail.com', 'ankit.raj@hostel.edu'];
+const ADMIN_EMAILS = ['dr.ankitraj8558@gmail.com', 'Jamaladnan0325@gmail.com'];
 
 // Files are served from the project's public/ folder
 const REGISTER_PATHS = ['/data/OBH_ROOM_REGISTER.json', '/OBH_ROOM_REGISTER.json'];
