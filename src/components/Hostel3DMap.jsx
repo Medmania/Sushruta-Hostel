@@ -278,7 +278,7 @@ export default function Hostel3DMap({ approvedStudents }) {
 
     const readingMesh = new THREE.Mesh(
       new THREE.BoxGeometry(5, 1.25, 4.6),
-      new THREE.MeshStandardMaterial({ color: 0ca8a04, roughness: 0.55 })
+      new THREE.MeshStandardMaterial({ color: 0xca8a04, roughness: 0.55 })
     );
     readingMesh.position.set(badmintonX, firstFloorY, badmintonZ + 2.5);
     readingMesh.castShadow = true;
