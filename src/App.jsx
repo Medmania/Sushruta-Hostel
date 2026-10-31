@@ -9,6 +9,7 @@ import {
   Bell, Paperclip, MessageSquare, ShieldCheck, Filter, ChevronRight, Check, CornerDownRight, FileJson, Download, RefreshCw,
   ChevronDown, ChevronUp, SlidersHorizontal, Info, MoreVertical, Link2, Smartphone, Save, ZoomIn, ZoomOut, RotateCcw
 } from 'lucide-react';
+import Hostel3DMap from './Hostel3DMap'; // Imported from separate file
 
 // --- DEFAULT CONFIGURATION ---
 const DEFAULT_CONFIG = {
@@ -72,249 +73,6 @@ const isOccupantKey = (key) => {
     /^bed\d*$/.test(k)
   );
 };
-
-// --- THREE.JS 3D HOSTEL MAP COMPONENT ---
-function Hostel3DMap({ approvedStudents }) {
-  const containerRef = useRef(null);
-  const searchInputRef = useRef(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !window.THREE) return;
-
-    const THREE = window.THREE;
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b0f19);
-    scene.fog = new THREE.FogExp2(0x0b0f19, 0.011);
-
-    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
-    camera.position.set(0, 48, 72);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    container.appendChild(renderer.domElement);
-
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.06;
-    controls.maxPolarAngle = Math.PI / 2 - 0.05;
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
-    dirLight.position.set(35, 55, 25);
-    dirLight.castShadow = true;
-    scene.add(dirLight);
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(140, 110),
-      new THREE.MeshStandardMaterial({ color: 0x1a1a24, roughness: 0.9 })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
-
-    scene.add(new THREE.GridHelper(140, 70, 0x333344, 0x222233));
-
-    const interactiveMeshes = [];
-    const roomSize = { w: 1.55, h: 1.25, d: 1.55 };
-
-    function createRoomLabel(text) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 128; canvas.height = 64;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'rgba(15,23,42,0.85)';
-      ctx.roundRect(4, 8, 120, 48, 10);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 28px Inter, Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, 64, 34);
-
-      const texture = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
-      sprite.scale.set(1.8, 0.9, 1);
-      return sprite;
-    }
-
-    function createBlockLabel(text, bg) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 512; canvas.height = 128;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = bg || 'rgba(30,58,138,0.9)';
-      ctx.roundRect(20, 20, 472, 88, 16);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 42px Inter, Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, 256, 68);
-
-      const texture = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
-      sprite.scale.set(7, 1.8, 1);
-      return sprite;
-    }
-
-    function addRoom(x, y, z, roomNo, block, color) {
-      const geo = new THREE.BoxGeometry(roomSize.w, roomSize.h, roomSize.d);
-      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.08 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(x, y, z);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.userData = { roomNo: String(roomNo), block };
-
-      const label = createRoomLabel(String(roomNo));
-      label.position.set(0, roomSize.h / 2 + 0.55, 0);
-      mesh.add(label);
-
-      scene.add(mesh);
-      interactiveMeshes.push(mesh);
-      return mesh;
-    }
-
-    const blueTiers = [0x3b82f6, 0x2563eb, 0x1d4ed8, 0x1e40af];
-    const orangeTiers = [0xf97316, 0xea580c, 0xc2410c, 0x9a3412];
-    const yellowTiers = [0xeab308, 0xca8a04, 0xa16207, 0x854d0e];
-
-    // Mathura (North) & (South)
-    for (let i = 0; i < 18; i++) {
-      const base = 18 + i;
-      [base, base + 87, base + 174].forEach((num, floor) => {
-        const z = 14 - i * (roomSize.d + 0.12);
-        const y = floor * (roomSize.h + 0.12) + roomSize.h / 2;
-        addRoom(-32, y, z, num, "Mathura (North)", blueTiers[floor % 4]);
-      });
-    }
-    const northLabel = createBlockLabel("MATHURA (NORTH)", "rgba(30,58,138,0.92)");
-    northLabel.position.set(-32, 7.8, 4);
-    northLabel.scale.set(6.5, 1.7, 1);
-    scene.add(northLabel);
-
-    for (let i = 0; i < 17; i++) {
-      const base = 36 + i;
-      [base, base + 87, base + 174].forEach((num, floor) => {
-        const z = -17.5 - i * (roomSize.d + 0.12);
-        const y = floor * (roomSize.h + 0.12) + roomSize.h / 2;
-        addRoom(-32, y, z, num, "Mathura (South)", blueTiers[floor % 4]);
-      });
-    }
-    const southLabel = createBlockLabel("MATHURA (SOUTH)", "rgba(30,58,138,0.92)");
-    southLabel.position.set(-32, 7.8, -27);
-    southLabel.scale.set(6.5, 1.7, 1);
-    scene.add(southLabel);
-
-    // Tennis Block
-    const tLeft = [[53,140,227,279], [54,141,228,280], [55,142,229,281], [56,143,230,282], [57,144,231,283], [58,145,232,284], [59,146,233,285], [60,147,234,286]];
-    tLeft.forEach((col, idx) => {
-      col.forEach((num, floor) => {
-        const x = -20 + idx * (roomSize.w + 0.12);
-        const y = floor * (roomSize.h + 0.12) + roomSize.h / 2;
-        addRoom(x, y, -26, num, "Tennis Block", orangeTiers[floor % 4]);
-      });
-    });
-
-    const tRight = [[61,148,235,287], [62,149,236,288], [63,150,237,289], [64,151,238,290], [65,152,239,291], [66,153,240,292], [67,154,241,293], [68,155,242,294], [69,156,243,295]];
-    tRight.forEach((col, idx) => {
-      col.forEach((num, floor) => {
-        const x = -20 + (8 * (roomSize.w + 0.12)) + 1.8 + idx * (roomSize.w + 0.12);
-        const y = floor * (roomSize.h + 0.12) + roomSize.h / 2;
-        addRoom(x, y, -26, num, "Tennis Block", orangeTiers[floor % 4]);
-      });
-    });
-
-    const tLabel = createBlockLabel("TENNIS BLOCK", "rgba(194,65,12,0.92)");
-    tLabel.position.set(-10, 8.2, -26);
-    scene.add(tLabel);
-
-    // Office Block
-    const officeCols = [
-      [17,104,191,278], [16,103,190,277], [15,102,189,276], [14,101,188,275],
-      [13,100,187,274], [12,99,186,273], [11,98,185,272], [10,97,184,271]
-    ];
-    officeCols.forEach((col, idx) => {
-      col.forEach((num, floor) => {
-        const x = -20 + idx * (roomSize.w + 0.12);
-        const y = floor * (roomSize.h + 0.12) + roomSize.h / 2;
-        addRoom(x, y, 26, num, "Office Block", yellowTiers[floor % 4]);
-      });
-    });
-    const officeLabel = createBlockLabel("OFFICE BLOCK", "rgba(202,138,4,0.92)");
-    officeLabel.position.set(-13, 8.2, 26);
-    scene.add(officeLabel);
-
-    // Search handler
-    const searchInput = searchInputRef.current;
-    const handleSearchKey = (e) => {
-      if (e.key !== 'Enter') return;
-      const q = e.target.value.trim().toLowerCase();
-      if (!q) return;
-      const found = interactiveMeshes.find(m => m.userData.roomNo.toLowerCase() === q);
-      if (found) {
-        camera.position.set(found.position.x, found.position.y + 14, found.position.z + 16);
-        controls.target.copy(found.position);
-      } else {
-        alert('Room not found');
-      }
-    };
-    searchInput?.addEventListener('keydown', handleSearchKey);
-
-    let animationFrameId;
-    function animate() {
-      animationFrameId = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
-
-    const handleResize = () => {
-      if (!container) return;
-      camera.aspect = container.clientWidth / container.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(container.clientWidth, container.clientHeight);
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', handleResize);
-      searchInput?.removeEventListener('keydown', handleSearchKey);
-      if (renderer.domElement && container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
-    };
-  }, []);
-
-  return (
-    <div className="relative w-full h-[650px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-inner">
-      <div ref={containerRef} className="w-full h-full" />
-      
-      {/* Search Bar Overlay */}
-      <div className="absolute top-4 right-4 z-10 glass-panel px-4 py-3 rounded-2xl flex items-center space-x-3 pointer-events-auto">
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
-          <input 
-            type="text" 
-            ref={searchInputRef}
-            placeholder="Search room no..." 
-            className="bg-slate-900/80 border border-slate-700 rounded-xl pl-9 pr-4 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 w-44"
-          />
-        </div>
-      </div>
-
-      {/* Navigation Hint */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 glass-panel px-4 py-2 rounded-full text-[11px] text-slate-300 flex items-center space-x-4 pointer-events-none">
-        <span>Rotate: Click + Drag</span>
-        <span>Pan: Right Click + Drag</span>
-        <span>Zoom: Scroll</span>
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
   // Configuration State
@@ -412,7 +170,7 @@ export default function App() {
   const [editingStudent, setEditingStudent] = useState(null);
 
   // Fee Ledger Editing State
-  const [editingFeeEntry, setEditingFeeEntry] = useState(null); // null or index or 'new'
+  const [editingFeeEntry, setEditingFeeEntry] = useState(null);
   const [feeFormData, setFeeFormData] = useState({
     year: '2026-27',
     amount: 45000,
@@ -527,24 +285,6 @@ export default function App() {
       setIsInstalled(true);
       setDeferredPrompt(null);
     });
-
-    if ('serviceWorker' in navigator) {
-      const swCode = `
-        const CACHE_NAME = 'obh-portal-v1';
-        self.addEventListener('install', (e) => {
-          self.skipWaiting();
-        });
-        self.addEventListener('activate', (e) => {
-          e.waitUntil(clients.claim());
-        });
-        self.addEventListener('fetch', (e) => {
-          e.respondWith(fetch(e.request).catch(() => new Response('Offline')));
-        });
-      `;
-      const swBlob = new Blob([swCode], { type: 'text/javascript' });
-      const swUrl = URL.createObjectURL(swBlob);
-      navigator.serviceWorker.register(swUrl).catch(err => console.log('SW Registration skipped:', err));
-    }
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
@@ -2085,7 +1825,6 @@ export default function App() {
                                 }`}
                               >
                                 <div>
-                                  {/* PROMINENT ROOM NUMBER BADGE & CAPACITY */}
                                   <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-black/5 dark:border-white/5">
                                     <span className="px-2.5 py-1 rounded-xl bg-indigo-600 text-white font-black text-xs shadow-xs tracking-tight">
                                       Room {rm.room_no}
@@ -2095,7 +1834,6 @@ export default function App() {
                                     </span>
                                   </div>
 
-                                  {/* ALL OCCUPANTS LISTED INDIVIDUALLY & TAPPABLE */}
                                   <div className="my-2.5 space-y-1.5 min-h-[48px]">
                                     {occupants.length > 0 ? (
                                       <div className="space-y-1.5">
@@ -2131,7 +1869,6 @@ export default function App() {
                                   </div>
                                 </div>
 
-                                {/* CARD FOOTER WITH PROGRESS BAR */}
                                 <div className="mt-2 pt-2 border-t border-black/5 dark:border-white/5 space-y-1.5">
                                   <div className="w-full bg-black/10 dark:bg-white/10 h-1.5 rounded-full overflow-hidden">
                                     <div 
@@ -2594,7 +2331,7 @@ export default function App() {
                 <p className="font-medium">No complaints or queries filed.</p>
                 <button
                   onClick={() => setIsTicketModalOpen(true)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
+                  className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs"
                 >
                   Lodge Complaint
                 </button>
@@ -2613,7 +2350,6 @@ export default function App() {
               </div>
 
               <div className="flex items-center space-x-2 w-full sm:w-auto">
-                {/* View Mode Toggle Switcher */}
                 <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
                   <button
                     onClick={() => setMapViewMode('3d')}
