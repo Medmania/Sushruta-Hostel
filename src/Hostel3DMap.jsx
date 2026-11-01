@@ -8,7 +8,6 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
   const [searchResult, setSearchResult] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Store meshes + camera/controls so we can access them from search
   const sceneData = useRef({
     interactiveMeshes: [],
     camera: null,
@@ -50,7 +49,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
 
     // ===== BRIGHT GROUND =====
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(140, 110),
+      new THREE.PlaneGeometry(160, 130),
       new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.85 })
     );
     ground.rotation.x = -Math.PI / 2;
@@ -58,7 +57,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
     scene.add(ground);
 
     // ===== BRIGHT GRID =====
-    scene.add(new THREE.GridHelper(140, 70, 0xcbd5e1, 0xe2e8f0));
+    scene.add(new THREE.GridHelper(160, 80, 0xcbd5e1, 0xe2e8f0));
 
     const interactiveMeshes = [];
     sceneData.current.interactiveMeshes = interactiveMeshes;
@@ -157,14 +156,8 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
 
     // --- TENNIS BLOCK ---
     const tLeft = [
-      [53, 140, 227, 279],
-      [54, 141, 228, 280],
-      [55, 142, 229, 281],
-      [56, 143, 230, 282],
-      [57, 144, 231, 283],
-      [58, 145, 232, 284],
-      [59, 146, 233, 285],
-      [60, 147, 234, 286]
+      [53, 140, 227, 279], [54, 141, 228, 280], [55, 142, 229, 281], [56, 143, 230, 282],
+      [57, 144, 231, 283], [58, 145, 232, 284], [59, 146, 233, 285], [60, 147, 234, 286]
     ];
     tLeft.forEach((col, idx) => {
       col.forEach((num, floor) => {
@@ -175,15 +168,8 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
     });
 
     const tRight = [
-      [61, 148, 235, 287],
-      [62, 149, 236, 288],
-      [63, 150, 237, 289],
-      [64, 151, 238, 290],
-      [65, 152, 239, 291],
-      [66, 153, 240, 292],
-      [67, 154, 241, 293],
-      [68, 155, 242, 294],
-      [69, 156, 243, 295]
+      [61, 148, 235, 287], [62, 149, 236, 288], [63, 150, 237, 289], [64, 151, 238, 290],
+      [65, 152, 239, 291], [66, 153, 240, 292], [67, 154, 241, 293], [68, 155, 242, 294], [69, 156, 243, 295]
     ];
     tRight.forEach((col, idx) => {
       col.forEach((num, floor) => {
@@ -199,15 +185,8 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
 
     // --- PG BLOCK ---
     const pgLeft = [
-      [70, 157, 244, 296],
-      [71, 158, 245, 297],
-      [72, 159, 246, 298],
-      [73, 160, 247, 299],
-      [74, 161, 248, 300],
-      [75, 162, 249, 301],
-      [76, 163, 250, 302],
-      [77, 164, 251, 303],
-      [78, 165, 252, 304]
+      [70, 157, 244, 296], [71, 158, 245, 297], [72, 159, 246, 298], [73, 160, 247, 299],
+      [74, 161, 248, 300], [75, 162, 249, 301], [76, 163, 250, 302], [77, 164, 251, 303], [78, 165, 252, 304]
     ];
     pgLeft.forEach((col, idx) => {
       col.forEach((num, floor) => {
@@ -218,15 +197,8 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
     });
 
     const pgRight = [
-      [79, 166, 253, 305],
-      [80, 167, 254, 306],
-      [81, 168, 255, 307],
-      [82, 169, 256, 308],
-      [83, 170, 257, 309],
-      [84, 171, 258, 310],
-      [85, 172, 259, 311],
-      [86, 173, 260, 312],
-      [87, 174, 261, 313]
+      [79, 166, 253, 305], [80, 167, 254, 306], [81, 168, 255, 307], [82, 169, 256, 308],
+      [83, 170, 257, 309], [84, 171, 258, 310], [85, 172, 259, 311], [86, 173, 260, 312], [87, 174, 261, 313]
     ];
     pgRight.forEach((col, idx) => {
       col.forEach((num, floor) => {
@@ -242,14 +214,8 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
 
     // --- OFFICE BLOCK ---
     const officeCols = [
-      [17, 104, 191, 278],
-      [16, 103, 190, 277],
-      [15, 102, 189, 276],
-      [14, 101, 188, 275],
-      [13, 100, 187, 274],
-      [12, 99, 186, 273],
-      [11, 98, 185, 272],
-      [10, 97, 184, 271]
+      [17, 104, 191, 278], [16, 103, 190, 277], [15, 102, 189, 276], [14, 101, 188, 275],
+      [13, 100, 187, 274], [12, 99, 186, 273], [11, 98, 185, 272], [10, 97, 184, 271]
     ];
     officeCols.forEach((col, idx) => {
       col.forEach((num, floor) => {
@@ -264,10 +230,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
 
     // --- NCC BLOCK ---
     const nccLeft = [
-      [9, 96, 183, 270],
-      [8, 95, 182, 269],
-      [7, 94, 181, 268],
-      [6, 93, 180, 267]
+      [9, 96, 183, 270], [8, 95, 182, 269], [7, 94, 181, 268], [6, 93, 180, 267]
     ];
     nccLeft.forEach((col, idx) => {
       col.forEach((num, floor) => {
@@ -278,11 +241,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
     });
 
     const nccRight = [
-      [5, 92, 179, 266],
-      [4, 91, 178, 265],
-      [3, 90, 177, 264],
-      [2, 89, 176, 263],
-      [1, 88, 175, 262]
+      [5, 92, 179, 266], [4, 91, 178, 265], [3, 90, 177, 264], [2, 89, 176, 263], [1, 88, 175, 262]
     ];
     nccRight.forEach((col, idx) => {
       col.forEach((num, floor) => {
@@ -370,6 +329,99 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
     ttLabel.scale.set(3.6, 1.25, 1);
     scene.add(ttLabel);
 
+    // =====================================================
+    // ===== BOUNDARY WALL + ENTRY GATE (Option 3) ========
+    // =====================================================
+
+    const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.7 });
+    const wallHeight = 2.8;
+    const wallThickness = 0.6;
+
+    // Helper to create a wall segment
+    function createWall(x, z, width, depth) {
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(width, wallHeight, depth),
+        wallMaterial
+      );
+      wall.position.set(x, wallHeight / 2, z);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      scene.add(wall);
+      return wall;
+    }
+
+    // Outer Boundary (approximate rectangle around the campus)
+    // Front wall (near Office & NCC) - with gap for gate
+    createWall(-28, 42, 28, wallThickness);   // left front
+    createWall(28, 42, 28, wallThickness);    // right front
+
+    // Back wall
+    createWall(0, -48, 90, wallThickness);
+
+    // Left wall
+    createWall(-45, -3, wallThickness, 90);
+
+    // Right wall
+    createWall(48, -3, wallThickness, 90);
+
+    // ===== ENTRY GATE (Option 3 - Security / Barrier style) =====
+    // Positioned between Office Block and NCC Block (front center)
+    const gateX = 0;
+    const gateZ = 42;
+
+    // Left Pillar
+    const leftPillar = new THREE.Mesh(
+      new THREE.BoxGeometry(1.8, 5.5, 1.8),
+      new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.5 })
+    );
+    leftPillar.position.set(gateX - 5.5, 2.75, gateZ);
+    leftPillar.castShadow = true;
+    scene.add(leftPillar);
+
+    // Right Pillar
+    const rightPillar = new THREE.Mesh(
+      new THREE.BoxGeometry(1.8, 5.5, 1.8),
+      new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.5 })
+    );
+    rightPillar.position.set(gateX + 5.5, 2.75, gateZ);
+    rightPillar.castShadow = true;
+    scene.add(rightPillar);
+
+    // Top horizontal beam
+    const topBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(13, 1.2, 1.6),
+      new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.45 })
+    );
+    topBeam.position.set(gateX, 5.6, gateZ);
+    topBeam.castShadow = true;
+    scene.add(topBeam);
+
+    // Barrier bar (middle)
+    const barrier = new THREE.Mesh(
+      new THREE.BoxGeometry(9.5, 0.35, 0.35),
+      new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4, metalness: 0.3 })
+    );
+    barrier.position.set(gateX, 2.2, gateZ + 0.3);
+    barrier.castShadow = true;
+    scene.add(barrier);
+
+    // Small guard cabin on the right side of the gate
+    const guardCabin = new THREE.Mesh(
+      new THREE.BoxGeometry(3.2, 2.6, 3.2),
+      new THREE.MeshStandardMaterial({ color: 0xca8a04, roughness: 0.55 })
+    );
+    guardCabin.position.set(gateX + 9.5, 1.3, gateZ - 1);
+    guardCabin.castShadow = true;
+    scene.add(guardCabin);
+
+    // Gate Label
+    const gateLabel = createBlockLabel('ENTRY  •  SUSHRUTA HOSTEL', 'rgba(15,23,42,0.92)');
+    gateLabel.position.set(gateX, 7.2, gateZ);
+    gateLabel.scale.set(8, 1.6, 1);
+    scene.add(gateLabel);
+
+    // =====================================================
+
     // Reset button
     const resetBtn = document.getElementById('reset-cam-btn');
     const handleResetCam = () => {
@@ -407,7 +459,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
     };
   }, []);
 
-  // ===== SEARCH LOGIC (linked to live approvedStudents) =====
+  // ===== SEARCH LOGIC =====
   const handleSearch = () => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) {
@@ -418,62 +470,42 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
     const { interactiveMeshes, camera, controls } = sceneData.current;
     if (!interactiveMeshes.length) return;
 
-    // 1. Try exact room number match first
+    // 1. Room number search
     const roomMatch = interactiveMeshes.find(
       (m) => m.userData.roomNo.toLowerCase() === q
     );
 
     if (roomMatch) {
-      // Get residents of this room from live data
-      const residents = approvedStudents.filter(
-        (s) =>
-          String(s.room_no || '').trim() === roomMatch.userData.roomNo &&
-          (s.block || '').toLowerCase().includes(
-            roomMatch.userData.block.toLowerCase().split(' ')[0]
-          )
-      );
-
-      // Fallback: match only by room number if block matching is loose
       const residentsByRoom = approvedStudents.filter(
         (s) => String(s.room_no || '').trim() === roomMatch.userData.roomNo
       );
-
-      const finalResidents = residents.length > 0 ? residents : residentsByRoom;
 
       setSearchResult({
         type: 'room',
         roomNo: roomMatch.userData.roomNo,
         block: roomMatch.userData.block,
-        residents: finalResidents.map((r) => ({
+        residents: residentsByRoom.map((r) => ({
           name: r.name,
           batch: r.batch || 'N/A'
         }))
       });
 
-      // Zoom to room
-      camera.position.set(
-        roomMatch.position.x,
-        roomMatch.position.y + 14,
-        roomMatch.position.z + 16
-      );
+      camera.position.set(roomMatch.position.x, roomMatch.position.y + 14, roomMatch.position.z + 16);
       controls.target.copy(roomMatch.position);
       return;
     }
 
-    // 2. Search by student name
+    // 2. Student name search
     const studentMatches = approvedStudents.filter((s) =>
       (s.name || '').toLowerCase().includes(q)
     );
 
     if (studentMatches.length > 0) {
-      const student = studentMatches[0]; // take first match
+      const student = studentMatches[0];
       const roomNo = String(student.room_no || '').trim();
       const block = student.block || 'Unknown';
 
-      // Find the 3D mesh for this room
-      const roomMesh = interactiveMeshes.find(
-        (m) => m.userData.roomNo === roomNo
-      );
+      const roomMesh = interactiveMeshes.find((m) => m.userData.roomNo === roomNo);
 
       setSearchResult({
         type: 'student',
@@ -484,17 +516,12 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
       });
 
       if (roomMesh) {
-        camera.position.set(
-          roomMesh.position.x,
-          roomMesh.position.y + 14,
-          roomMesh.position.z + 16
-        );
+        camera.position.set(roomMesh.position.x, roomMesh.position.y + 14, roomMesh.position.z + 16);
         controls.target.copy(roomMesh.position);
       }
       return;
     }
 
-    // Nothing found
     setSearchResult({ type: 'notfound', query: searchQuery });
   };
 
@@ -506,7 +533,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
     <div className="relative w-full h-[650px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-inner select-none">
       <div ref={containerRef} className="w-full h-full" />
 
-      {/* Header Title */}
+      {/* Header */}
       <div className="absolute top-4 left-4 z-10 px-5 py-4 rounded-2xl max-w-xs pointer-events-auto bg-white/90 backdrop-blur border border-slate-200 shadow-sm">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg">
@@ -519,7 +546,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
         </div>
       </div>
 
-      {/* Search Bar & Reset */}
+      {/* Search Bar */}
       <div className="absolute top-4 right-4 z-10 px-4 py-3 rounded-2xl flex items-center space-x-3 pointer-events-auto bg-white/90 backdrop-blur border border-slate-200 shadow-sm">
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
@@ -548,7 +575,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
         </button>
       </div>
 
-      {/* ===== SEARCH RESULT CARD ===== */}
+      {/* Search Result Card */}
       {searchResult && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 w-[90%] max-w-sm pointer-events-auto">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-4 relative">
@@ -562,12 +589,8 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
             {searchResult.type === 'room' && (
               <div className="space-y-3">
                 <div>
-                  <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
-                    Room Found
-                  </p>
-                  <h3 className="font-bold text-base text-slate-800">
-                    Room {searchResult.roomNo}
-                  </h3>
+                  <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Room Found</p>
+                  <h3 className="font-bold text-base text-slate-800">Room {searchResult.roomNo}</h3>
                   <p className="text-xs text-slate-500">{searchResult.block}</p>
                 </div>
 
@@ -575,10 +598,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
                   <div className="space-y-1.5">
                     <p className="text-[10px] font-bold text-slate-400 uppercase">Residents</p>
                     {searchResult.residents.map((r, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2"
-                      >
+                      <div key={i} className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2">
                         <span className="font-medium text-sm text-slate-800">{r.name}</span>
                         <span className="text-xs text-slate-500">Batch {r.batch}</span>
                       </div>
@@ -592,9 +612,7 @@ export default function Hostel3DMap({ approvedStudents = [] }) {
 
             {searchResult.type === 'student' && (
               <div className="space-y-2">
-                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
-                  Student Found
-                </p>
+                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Student Found</p>
                 <h3 className="font-bold text-base text-slate-800">{searchResult.name}</h3>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-500">Batch {searchResult.batch}</span>
