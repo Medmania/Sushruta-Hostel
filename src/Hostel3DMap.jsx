@@ -12,8 +12,10 @@ export default function Hostel3DMap({ approvedStudents }) {
 
     const THREE = window.THREE;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b0f19);
-    scene.fog = new THREE.FogExp2(0x0b0f19, 0.011);
+    
+    // ===== BRIGHT BACKGROUND =====
+    scene.background = new THREE.Color(0xf1f5f9);
+    scene.fog = new THREE.FogExp2(0xf1f5f9, 0.006);
 
     const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
     camera.position.set(0, 48, 72);
@@ -29,21 +31,23 @@ export default function Hostel3DMap({ approvedStudents }) {
     controls.dampingFactor = 0.06;
     controls.maxPolarAngle = Math.PI / 2 - 0.05;
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
     dirLight.position.set(35, 55, 25);
     dirLight.castShadow = true;
     scene.add(dirLight);
 
+    // ===== BRIGHT GROUND =====
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(140, 110),
-      new THREE.MeshStandardMaterial({ color: 0x1a1a24, roughness: 0.9 })
+      new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.85 })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
 
-    scene.add(new THREE.GridHelper(140, 70, 0x333344, 0x222233));
+    // ===== BRIGHT GRID =====
+    scene.add(new THREE.GridHelper(140, 70, 0xcbd5e1, 0xe2e8f0));
 
     const interactiveMeshes = [];
     const roomSize = { w: 1.55, h: 1.25, d: 1.55 };
@@ -356,44 +360,44 @@ export default function Hostel3DMap({ approvedStudents }) {
   }, []);
 
   return (
-    <div className="relative w-full h-[650px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-inner select-none">
+    <div className="relative w-full h-[650px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-inner select-none">
       <div ref={containerRef} className="w-full h-full" />
       
       {/* Header Title */}
-      <div className="absolute top-4 left-4 z-10 glass-panel px-5 py-4 rounded-2xl max-w-xs pointer-events-auto">
+      <div className="absolute top-4 left-4 z-10 glass-panel px-5 py-4 rounded-2xl max-w-xs pointer-events-auto bg-white/90 backdrop-blur border border-slate-200 shadow-sm">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg">
             <i className="fa-solid fa-building-columns text-slate-950"></i>
           </div>
           <div>
-            <h1 class="font-bold text-sm text-white leading-tight">Sushruta Hostel</h1>
-            <p class="text-[10px] text-emerald-400 font-medium">OBH 3D Interactive Map</p>
+            <h1 className="font-bold text-sm text-slate-800 leading-tight">Sushruta Hostel</h1>
+            <p className="text-[10px] text-emerald-600 font-medium">OBH 3D Interactive Map</p>
           </div>
         </div>
       </div>
 
       {/* Search Bar & Reset Overlay */}
-      <div className="absolute top-4 right-4 z-10 glass-panel px-4 py-3 rounded-2xl flex items-center space-x-3 pointer-events-auto">
+      <div className="absolute top-4 right-4 z-10 glass-panel px-4 py-3 rounded-2xl flex items-center space-x-3 pointer-events-auto bg-white/90 backdrop-blur border border-slate-200 shadow-sm">
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
           <input 
             type="text" 
             ref={searchInputRef}
             placeholder="Search room no..." 
-            className="bg-slate-900/80 border border-slate-700 rounded-xl pl-9 pr-4 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 w-44"
+            className="bg-white border border-slate-300 rounded-xl pl-9 pr-4 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 w-44"
           />
         </div>
         <button 
           id="reset-cam-btn" 
-          className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-700 flex items-center space-x-1.5 cursor-pointer"
+          className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-medium border border-slate-300 flex items-center space-x-1.5 cursor-pointer"
         >
-          <Home className="w-3.5 h-3.5 text-emerald-400" />
+          <Home className="w-3.5 h-3.5 text-emerald-600" />
           <span>Reset</span>
         </button>
       </div>
 
       {/* Navigation Hint */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 glass-panel px-5 py-2.5 rounded-full text-xs text-slate-300 flex items-center space-x-5 pointer-events-none">
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 glass-panel px-5 py-2.5 rounded-full text-xs text-slate-600 flex items-center space-x-5 pointer-events-none bg-white/90 backdrop-blur border border-slate-200 shadow-sm">
         <span>Rotate: Click + Drag</span>
         <span>Pan: Right Click + Drag</span>
         <span>Zoom: Scroll</span>
